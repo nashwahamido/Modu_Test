@@ -2,18 +2,22 @@ import React from 'react';
 import { Pressable, Text, StyleSheet } from 'react-native';
 import { useAssemblyStore } from '../store/assemblyStore';
 
-export function FocusModeToggle() {
-  const focusMode = useAssemblyStore((s) => s.focusMode);
-  const toggleFocusMode = useAssemblyStore((s) => s.toggleFocusMode);
+/**
+ * Toggle between manual rotation (joystick) and auto-focus on the
+ * current target part when a part is held.
+ */
+export function AutoRotateToggle() {
+  const autoRotate = useAssemblyStore((s) => s.autoRotate);
+  const toggleAutoRotate = useAssemblyStore((s) => s.toggleAutoRotate);
 
   return (
     <Pressable
-      onPress={toggleFocusMode}
-      style={[styles.button, focusMode && styles.buttonActive]}
+      onPress={toggleAutoRotate}
+      style={[styles.button, autoRotate && styles.buttonActive]}
     >
-      <Text style={styles.icon}>🎯</Text>
-      <Text style={[styles.label, focusMode && styles.labelActive]}>
-        {focusMode ? 'Focus ON' : 'Focus'}
+      <Text style={styles.icon}>🎥</Text>
+      <Text style={[styles.label, autoRotate && styles.labelActive]}>
+        {autoRotate ? 'Auto-view ON' : 'Auto-view'}
       </Text>
     </Pressable>
   );

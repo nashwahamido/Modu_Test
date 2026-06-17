@@ -1,17 +1,20 @@
-import React, { Suspense } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
-import { Canvas } from '@react-three/fiber/native';
-import { useGLTF } from '@react-three/drei/native';
-import * as THREE from 'three';
-import { AssemblyDefinition, AssemblyStep } from '../../data/lackAssembly';
-import { useAssemblyStore } from '../../store/assemblyStore';
+import React from 'react';
+import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
+import { AssemblyDefinition, AssemblyStep } from '../data/lackAssembly';
+import { useAssemblyStore } from '../store/assemblyStore';
 
 interface TrayProps {
   definition: AssemblyDefinition;
-  onPressPart: (step: AssemblyStep, screenX: number, screenY: number) => void;
+  onPickupPart: (step: AssemblyStep) => void;
 }
 
-export function PartTray({ definition, onPressPart }: TrayProps) {
+/**
+ * Right-side part tray.
+ * Normal mode: shows all parts (locked ones are dimmed).
+ * Focus mode: shows only the current pending part.
+ * Tapping a pending part picks it up.
+ */
+export function PartTray({ definition, onPickupPart }: TrayProps) {
   const statuses = useAssemblyStore((s) => s.statuses);
   const focusMode = useAssemblyStore((s) => s.focusMode);
 
@@ -22,92 +25,77 @@ export function PartTray({ definition, onPressPart }: TrayProps) {
   return (
     <View style={styles.tray} pointerEvents="box-none">
       {focusMode && <Text style={styles.focusLabel}>FOCUS</Text>}
-      {visibleSteps.map((step: AssemblyStep) => {
-        const status = statuses[step.id];
-        const disabled = status !== 'pending';
-        return (
-          <Pressable
-            key={step.id}
-            disabled={disabled}
-            onPressIn={(e) =>
-              onPressPart(step, e.nativeEvent.pageX, e.nativeEvent.pageY)
-            }
-            style={[
-              styles.chip,
-              status === 'done' && styles.chipDone,
-              status === 'locked' && styles.chipLocked,
-              status === 'pending' && styles.chipActive,
-            ]}
-          >
-            <View style={styles.preview}>
-              <Canvas camera={{ position: [0, 0, 1.6], fov: 40 }}>
-                <ambientLight intensity={0.7} />
-                <directionalLight position={[2, 3, 2]} intensity={0.8} />
-                <Suspense fallback={null}>
-                  <PartPreview
-                    glbUrl={definition.glbUrl}
-                    meshName={step.meshName}
-                  />
-                </Suspense>
-              </Canvas>
-            </View>
-            <Text style={styles.partLabel}>{step.label}</Text>
-            <Text style={styles.partNo}>#{step.partNumber}</Text>
-            {status === 'done' && <Text style={styles.check}>✓</Text>}
-          </Pressable>
-        );
-      })}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {visibleSteps.map((step: AssemblyStep) => {
+          const status = statuses[step.id];
+          const isPending = status === 'pending';
+          return (
+            <Pressable
+              key={step.id}
+              disabled={!isPending}
+              onPress={() => {
+                if (isPending) onPickupPart(step);
+              }}
+              style={[
+                styles.chip,
+                status === 'done' && styles.chipDone,
+                status === 'locked' && styles.chipLocked,
+                isPending && styles.chipActive,
+              ]}
+            >
+              <View style={styles.iconContainer}>
+                {step.partNumber === '115980' ? (
+                  <ScrewIcon />
+                ) : (
+                  <LegIcon />
+                )}
+              </View>
+              <Text style={styles.partLabel}>{step.label}</Text>
+              <Text style={styles.partNo}>#{step.partNumber}</Text>
+              {status === 'done' && <Text style={styles.check}>✓</Text>}
+              {isPending && <Text style={styles.tapHint}>TAP</Text>}
+            </Pressable>
+          );
+        })}
+      </ScrollView>
     </View>
   );
 }
 
-function PartPreview({
-  glbUrl,
-  meshName,
-}: {
-  glbUrl: string;
-  meshName: string;
-}) {
-  const { scene } = useGLTF(glbUrl);
-  const source = scene.getObjectByName(meshName) as THREE.Mesh | undefined;
-  if (!source) return null;
-  const clone = source.clone();
-  const box = new THREE.Box3().setFromObject(clone);
-  const size = new THREE.Vector3();
-  box.getSize(size);
-  const scale = 0.9 / Math.max(size.x, size.y, size.z);
-  clone.position.set(0, 0, 0);
-  clone.scale.setScalar(scale);
-  return <SpinningPart object={clone} />;
+/** Simple screw icon drawn with RN views */
+function ScrewIcon() {
+  return (
+    <View style={styles.screwIcon}>
+      <View style={styles.screwHead} />
+      <View style={styles.screwShaft} />
+    </View>
+  );
 }
 
-function SpinningPart({ object }: { object: THREE.Object3D }) {
-  const ref = React.useRef<THREE.Group>(null);
-  React.useEffect(() => {
-    let raf: number;
-    const tick = () => {
-      if (ref.current) ref.current.rotation.y += 0.02;
-      raf = requestAnimationFrame(tick);
-    };
-    tick();
-    return () => cancelAnimationFrame(raf);
-  }, []);
+/** Simple leg icon drawn with RN views */
+function LegIcon() {
   return (
-    <group ref={ref}>
-      <primitive object={object} />
-    </group>
+    <View style={styles.legIcon}>
+      <View style={styles.legBar} />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   tray: {
     position: 'absolute',
-    right: 12,
-    top: 0,
-    bottom: 0,
+    right: 8,
+    top: 8,
+    bottom: 8,
+    width: 80,
     justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
+  },
+  scrollContent: {
+    gap: 6,
+    paddingVertical: 4,
   },
   focusLabel: {
     color: '#64b4ff',
@@ -119,7 +107,7 @@ const styles = StyleSheet.create({
   },
   chip: {
     width: 76,
-    height: 80,
+    height: 72,
     borderRadius: 10,
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1,
@@ -137,8 +125,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(60,220,130,0.12)',
   },
   chipLocked: { opacity: 0.35 },
-  preview: { width: 60, height: 48 },
-  partLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 9, marginTop: 1 },
+  iconContainer: {
+    width: 40,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  partLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 9, marginTop: 2 },
   partNo: { color: 'rgba(255,255,255,0.4)', fontSize: 8 },
   check: {
     position: 'absolute',
@@ -146,5 +139,39 @@ const styles = StyleSheet.create({
     right: 6,
     color: '#3ddc84',
     fontSize: 14,
+  },
+  tapHint: {
+    position: 'absolute',
+    bottom: 3,
+    color: '#64b4ff',
+    fontSize: 7,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  // Screw icon
+  screwIcon: { alignItems: 'center' },
+  screwHead: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: 'rgba(200,200,210,0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  screwShaft: {
+    width: 3,
+    height: 14,
+    backgroundColor: 'rgba(180,180,190,0.5)',
+    borderRadius: 1,
+  },
+  // Leg icon
+  legIcon: { alignItems: 'center' },
+  legBar: {
+    width: 8,
+    height: 26,
+    backgroundColor: 'rgba(200,200,210,0.5)',
+    borderRadius: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
 });

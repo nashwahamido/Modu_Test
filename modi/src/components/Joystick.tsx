@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { GestureDetector, Gesture, GestureType } from 'react-native-gesture-handler';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -9,12 +9,11 @@ import Animated, {
 
 interface JoystickProps {
   vector: React.MutableRefObject<{ x: number; y: number }>;
-  sceneGesture?: GestureType;
 }
 
 const MAX_R = 34;
 
-export function Joystick({ vector, sceneGesture }: JoystickProps) {
+export function Joystick({ vector }: JoystickProps) {
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
 
@@ -38,17 +37,13 @@ export function Joystick({ vector, sceneGesture }: JoystickProps) {
       runOnJS(setVector)(0, 0);
     });
 
-  const gesture = sceneGesture
-    ? Gesture.Simultaneous(pan, sceneGesture)
-    : pan;
-
   const thumbStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: tx.value }, { translateY: ty.value }],
   }));
 
   return (
     <View style={styles.zone} pointerEvents="box-none">
-      <GestureDetector gesture={gesture}>
+      <GestureDetector gesture={pan}>
         <View style={styles.base}>
           <Animated.View style={[styles.thumb, thumbStyle]} />
         </View>
