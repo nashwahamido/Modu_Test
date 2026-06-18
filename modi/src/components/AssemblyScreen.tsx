@@ -17,6 +17,7 @@ import { Joystick } from './Joystick';
 import { PartTray } from './PartTray';
 import { FocusModeToggle } from './FocusModeToggle';
 import { AutoRotateToggle } from './AutoRotateToggle';
+import { HintsToggle } from './HintsToggle';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
@@ -42,6 +43,7 @@ export function AssemblyScreen() {
   const [heldLabel, setHeldLabel] = useState<string | null>(null);
 
   const cameraOffset = useRef({ x: 0, y: 0 });
+  const modelOffset = useRef({ x: 0, z: 0 });
   const lastPanPos = useRef<{ x: number; y: number } | null>(null);
   const lastPinchDist = useRef<number>(0);
   const baseZoom = useRef<number>(1);
@@ -126,6 +128,18 @@ export function AssemblyScreen() {
           x: (touches[0].pageX / SCREEN_W) * 2 - 1,
           y: -(touches[0].pageY / SCREEN_H) * 2 + 1,
         };
+      } else if (s.completed) {
+        // After assembly: drag moves the whole table across the ground
+        if (lastPanPos.current) {
+          const dx2 = (touches[0].pageX - lastPanPos.current.x) * 0.005;
+          const dy2 = (touches[0].pageY - lastPanPos.current.y) * 0.008;
+          // Screen X → world X; screen Y → world Z (further/closer on floor)
+          modelOffset.current = {
+            x: modelOffset.current.x + dx2,
+            z: modelOffset.current.z + dy2,
+          };
+          lastPanPos.current = { x: touches[0].pageX, y: touches[0].pageY };
+        }
       } else {
         if (lastPanPos.current) {
           const dx2 = (touches[0].pageX - lastPanPos.current.x) * 0.003;
@@ -199,9 +213,9 @@ export function AssemblyScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Temp solid warm background (gradient disabled for debugging) */}
+      {/* Sage backdrop to blend with the 3D cutting-mat ground */}
       <View
-        style={[StyleSheet.absoluteFill, { backgroundColor: '#e9c9b0' }]}
+        style={[StyleSheet.absoluteFill, { backgroundColor: '#6f8a68' }]}
       />
 
       <View
@@ -242,6 +256,7 @@ export function AssemblyScreen() {
               pointerNDC={pointerNDC}
               joystick={joystick}
               cameraOffset={cameraOffset}
+              modelOffset={modelOffset}
             />
           </React.Suspense>
         </Canvas>
@@ -258,14 +273,14 @@ export function AssemblyScreen() {
         {!focusMode && !held && (
           <Text style={styles.sub}>
             {store.completed
-              ? 'Great work!'
+              ? 'Great work! Drag the table to move it around'
               : `Step ${stepNumber} of ${totalSteps} · Tap a part to start`}
           </Text>
         )}
-        {held && !isScrewing && (
+        {store.guidanceOn && held && !isScrewing && (
           <Text style={styles.heldHint}>Drag to the green dot, then lift</Text>
         )}
-        {isScrewing && (
+        {store.guidanceOn && isScrewing && (
           <Text style={styles.screwHint}>
             Rotate your finger in circles to screw in
           </Text>
@@ -315,12 +330,16 @@ export function AssemblyScreen() {
 
       {/* Toggles — always visible */}
       <View style={styles.toggleContainer}>
+        <HintsToggle />
         <AutoRotateToggle />
         <FocusModeToggle />
       </View>
 
       {/* Part tray */}
-      <PartTray definition={def} onPickupPart={handlePickupFromTray} />
+      <PartTray
+        definition={def}
+        onPickupPart={handlePickupFromTray}
+      />
 
       {/* Joystick */}
       <Joystick vector={joystick} />
@@ -329,7 +348,7 @@ export function AssemblyScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#e9c9b0' },
+  root: { flex: 1, backgroundColor: '#6f8a68' },
   stepPanel: {
     position: 'absolute',
     top: 12,

@@ -1,7 +1,12 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, Image } from 'react-native';
 import { AssemblyDefinition, AssemblyStep } from '../data/lackAssembly';
 import { useAssemblyStore } from '../store/assemblyStore';
+
+// Static part thumbnails rendered in Blender (transparent PNGs).
+// Place the two files at: modi/assets/parts/bolt.png and leg.png
+const BOLT_THUMB = require('../../assets/parts/bolt.png');
+const LEG_THUMB = require('../../assets/parts/leg.png');
 
 interface TrayProps {
   definition: AssemblyDefinition;
@@ -32,6 +37,8 @@ export function PartTray({ definition, onPickupPart }: TrayProps) {
         {visibleSteps.map((step: AssemblyStep) => {
           const status = statuses[step.id];
           const isPending = status === 'pending';
+          const isBolt = step.partNumber === '115980';
+          const thumbSource = isBolt ? BOLT_THUMB : LEG_THUMB;
           return (
             <Pressable
               key={step.id}
@@ -47,11 +54,11 @@ export function PartTray({ definition, onPickupPart }: TrayProps) {
               ]}
             >
               <View style={styles.iconContainer}>
-                {step.partNumber === '115980' ? (
-                  <ScrewIcon />
-                ) : (
-                  <LegIcon />
-                )}
+                <Image
+                  source={thumbSource}
+                  style={styles.thumb}
+                  resizeMode="contain"
+                />
               </View>
               <Text style={styles.partLabel}>{step.label}</Text>
               <Text style={styles.partNo}>#{step.partNumber}</Text>
@@ -61,25 +68,6 @@ export function PartTray({ definition, onPickupPart }: TrayProps) {
           );
         })}
       </ScrollView>
-    </View>
-  );
-}
-
-/** Simple screw icon drawn with RN views */
-function ScrewIcon() {
-  return (
-    <View style={styles.screwIcon}>
-      <View style={styles.screwHead} />
-      <View style={styles.screwShaft} />
-    </View>
-  );
-}
-
-/** Simple leg icon drawn with RN views */
-function LegIcon() {
-  return (
-    <View style={styles.legIcon}>
-      <View style={styles.legBar} />
     </View>
   );
 }
@@ -126,10 +114,14 @@ const styles = StyleSheet.create({
   },
   chipLocked: { opacity: 0.35 },
   iconContainer: {
-    width: 40,
-    height: 30,
+    width: 44,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  thumb: {
+    width: 44,
+    height: 36,
   },
   partLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 9, marginTop: 2 },
   partNo: { color: 'rgba(255,255,255,0.4)', fontSize: 8 },
@@ -147,31 +139,5 @@ const styles = StyleSheet.create({
     fontSize: 7,
     fontWeight: '700',
     letterSpacing: 1,
-  },
-  // Screw icon
-  screwIcon: { alignItems: 'center' },
-  screwHead: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: 'rgba(200,200,210,0.6)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
-  },
-  screwShaft: {
-    width: 3,
-    height: 14,
-    backgroundColor: 'rgba(180,180,190,0.5)',
-    borderRadius: 1,
-  },
-  // Leg icon
-  legIcon: { alignItems: 'center' },
-  legBar: {
-    width: 8,
-    height: 26,
-    backgroundColor: 'rgba(200,200,210,0.5)',
-    borderRadius: 2,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
   },
 });
