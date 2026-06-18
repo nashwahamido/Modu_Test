@@ -7,6 +7,7 @@ import {
   Pressable,
 } from 'react-native';
 import { Canvas } from '@react-three/fiber/native';
+// import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 
 import { LACK_ASSEMBLY, AssemblyStep } from '../data/lackAssembly';
@@ -32,6 +33,7 @@ export function AssemblyScreen() {
   const held = useAssemblyStore((s) => s.held);
   const snapState = useAssemblyStore((s) => s.snapState);
   const rotationProgress = useAssemblyStore((s) => s.rotationProgress);
+  const statuses = useAssemblyStore((s) => s.statuses);
   const def = LACK_ASSEMBLY;
 
   const pointerNDC = useRef<{ x: number; y: number } | null>(null);
@@ -44,7 +46,6 @@ export function AssemblyScreen() {
   const lastPinchDist = useRef<number>(0);
   const baseZoom = useRef<number>(1);
 
-  // For rotation gesture
   const lastAngle = useRef<number | null>(null);
   const rotationCenter = useRef({ x: SCREEN_W / 2, y: SCREEN_H / 2 });
 
@@ -61,7 +62,6 @@ export function AssemblyScreen() {
       baseZoom.current = s.zoom;
     } else if (touches.length === 1) {
       if (s.snapState === 'screwing') {
-        // Start tracking rotation angle
         const dx = touches[0].pageX - rotationCenter.current.x;
         const dy = touches[0].pageY - rotationCenter.current.y;
         lastAngle.current = Math.atan2(dy, dx);
@@ -91,28 +91,22 @@ export function AssemblyScreen() {
 
     if (touches.length === 1) {
       if (s.snapState === 'screwing') {
-        // Detect circular rotation
         const dx = touches[0].pageX - rotationCenter.current.x;
         const dy = touches[0].pageY - rotationCenter.current.y;
         const angle = Math.atan2(dy, dx);
 
         if (lastAngle.current !== null) {
           let delta = angle - lastAngle.current;
-          // Normalize to -PI..PI
           if (delta > Math.PI) delta -= Math.PI * 2;
           if (delta < -Math.PI) delta += Math.PI * 2;
-          // Only count counterclockwise (negative delta on screen = CCW)
-          // Accept both directions for usability
           const absDelta = Math.abs(delta);
           if (absDelta > 0.01) {
-            // Each full rotation (2π) ≈ 66% → ~1.5 rotations to complete
             s.addRotation(absDelta / (Math.PI * 3));
             Haptics.selectionAsync();
           }
         }
         lastAngle.current = angle;
 
-        // Check if done
         if (useAssemblyStore.getState().rotationProgress >= 1) {
           const step = s.currentStep();
           if (step && sceneRef.current?.commitSnap) {
@@ -155,10 +149,8 @@ export function AssemblyScreen() {
     if (!s.held || s.snapState === 'screwing') return;
 
     if (s.snapState === 'near_correct') {
-      // Snap to position, then enter screwing phase
       s.startScrewing();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      // Place part at target in scene
       pointerNDC.current = null;
     }
   }, []);
@@ -201,18 +193,48 @@ export function AssemblyScreen() {
   const isScrewing = snapState === 'screwing';
   const progressPct = Math.round(rotationProgress * 100);
 
+  // Overall assembly progress (recomputes whenever statuses change)
+  const doneCount = Object.values(statuses).filter((v) => v === 'done').length;
+  const overallPct = Math.round((doneCount / totalSteps) * 100);
+
   return (
     <View style={styles.root}>
+      {/* Temp solid warm background (gradient disabled for debugging) */}
+      <View
+        style={[StyleSheet.absoluteFill, { backgroundColor: '#e9c9b0' }]}
+      />
+
       <View
         style={StyleSheet.absoluteFill}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-        <Canvas camera={{ position: [0, 1.2, 2.0], fov: 42 }}>
-          <ambientLight intensity={0.55} />
-          <directionalLight position={[3, 6, 4]} intensity={0.85} castShadow />
-          <directionalLight position={[-3, 2, -2]} intensity={0.25} color="#6688ff" />
+        <Canvas
+          camera={{ position: [0, 0.2, 2.0], fov: 42 }}
+          gl={{ alpha: true }}
+          style={{ backgroundColor: 'transparent' }}
+        >
+          {/* Hemisphere wrap: warm sky tone above, soft amber bounce below.
+              This is the key to the cozy, evenly-lit cottagecore feel. */}
+          <hemisphereLight
+            args={['#ffe9cf', '#d9a877', 0.7]}
+          />
+          {/* Soft warm key light (the "afternoon sun") */}
+          <directionalLight
+            position={[4, 7, 5]}
+            intensity={0.9}
+            color="#ffd9a0"
+            castShadow
+          />
+          {/* Gentle fill from the opposite side so shadows aren't harsh */}
+          <directionalLight
+            position={[-4, 3, -2]}
+            intensity={0.3}
+            color="#ffcaa0"
+          />
+          {/* Low warm base ambient */}
+          <ambientLight intensity={0.25} color="#fff0e0" />
           <React.Suspense fallback={null}>
             <AssemblyScene
               ref={sceneRef}
@@ -230,7 +252,7 @@ export function AssemblyScreen() {
         {!focusMode && <Text style={styles.phase}>{phase}</Text>}
         <Text style={styles.instruction}>
           {store.completed
-            ? '🎉 LACK assembled! +' + store.xp + ' XP'
+            ? 'LACK assembled! +' + store.xp + ' XP'
             : step?.instruction}
         </Text>
         {!focusMode && !held && (
@@ -245,48 +267,54 @@ export function AssemblyScreen() {
         )}
         {isScrewing && (
           <Text style={styles.screwHint}>
-            🔄 Rotate your finger in circles to screw in!
+            Rotate your finger in circles to screw in
           </Text>
         )}
       </View>
 
+      {/* Overall assembly progress bar — always visible (except Focus mode) */}
+      {!focusMode && (
+        <View style={styles.overallProgress} pointerEvents="none">
+          <View style={styles.overallTrack}>
+            <View
+              style={[styles.overallFill, { width: `${overallPct}%` }]}
+            />
+          </View>
+          <Text style={styles.overallLabel}>
+            {doneCount} / {totalSteps} parts · {overallPct}%
+          </Text>
+        </View>
+      )}
+
       {/* XP */}
       {!focusMode && <Text style={styles.xp}>{store.xp} XP</Text>}
 
-      {/* Rotation progress indicator */}
+      {/* Rotation progress indicator (during screwing) */}
       {isScrewing && (
         <View style={styles.rotationOverlay} pointerEvents="none">
           <View style={styles.rotationRing}>
-            <View
-              style={[
-                styles.rotationFill,
-                {
-                  width: `${progressPct}%`,
-                },
-              ]}
-            />
+            <View style={[styles.rotationFill, { width: `${progressPct}%` }]} />
           </View>
           <Text style={styles.rotationText}>
-            {progressPct < 100 ? `${progressPct}%` : '✓ Done!'}
+            {progressPct < 100 ? `${progressPct}%` : 'Done!'}
           </Text>
-          <Text style={styles.rotationArrow}>↻</Text>
         </View>
       )}
 
       {/* Cancel button */}
       {held && (
         <Pressable style={styles.cancelBtn} onPress={handleCancel}>
-          <Text style={styles.cancelText}>✕ Cancel</Text>
+          <Text style={styles.cancelText}>Cancel</Text>
         </Pressable>
       )}
 
       {/* Reset */}
       <Pressable style={styles.resetBtn} onPress={handleReset}>
-        <Text style={styles.resetText}>⟳</Text>
+        <Text style={styles.resetText}>Reset</Text>
       </Pressable>
 
-      {/* Focus toggle + Auto-view toggle */}
-      <View style={styles.focusToggleContainer}>
+      {/* Toggles — always visible */}
+      <View style={styles.toggleContainer}>
         <AutoRotateToggle />
         <FocusModeToggle />
       </View>
@@ -301,7 +329,7 @@ export function AssemblyScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#16162a' },
+  root: { flex: 1, backgroundColor: '#e9c9b0' },
   stepPanel: {
     position: 'absolute',
     top: 12,
@@ -352,6 +380,30 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+  overallProgress: {
+    position: 'absolute',
+    bottom: 14,
+    alignSelf: 'center',
+    alignItems: 'center',
+  },
+  overallTrack: {
+    width: 240,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    overflow: 'hidden',
+  },
+  overallFill: {
+    height: '100%',
+    backgroundColor: '#ffb828',
+    borderRadius: 4,
+  },
+  overallLabel: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 3,
+  },
   rotationOverlay: {
     position: 'absolute',
     bottom: 80,
@@ -378,11 +430,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 4,
   },
-  rotationArrow: {
-    color: '#ffb828',
-    fontSize: 36,
-    marginTop: 4,
-  },
   cancelBtn: {
     position: 'absolute',
     bottom: 14,
@@ -403,9 +450,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 14,
     left: 60,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: 'rgba(255,255,255,0.1)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.2)',
@@ -414,9 +461,10 @@ const styles = StyleSheet.create({
   },
   resetText: {
     color: 'rgba(255,255,255,0.7)',
-    fontSize: 18,
+    fontSize: 12,
+    fontWeight: '600',
   },
-  focusToggleContainer: {
+  toggleContainer: {
     position: 'absolute',
     bottom: 14,
     right: 100,

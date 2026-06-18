@@ -51,16 +51,18 @@ export const AssemblyScene = React.forwardRef<unknown, SceneProps>(
     const setSnapState = useAssemblyStore((s) => s.setSnapState);
     const rotationProgress = useAssemblyStore((s) => s.rotationProgress);
     const autoRotate = useAssemblyStore((s) => s.autoRotate);
+    const completed = useAssemblyStore((s) => s.completed);
     const zoom = useAssemblyStore((s) => s.zoom);
 
     const raycaster = useMemo(() => new THREE.Raycaster(), []);
     const ghostRef = useRef<THREE.Mesh | null>(null);
     const dismantled = useRef(false);
     const autoZoomRef = useRef(1);
+    // When set, the scene smoothly returns to the default centered view
+    const resetRequested = useRef(false);
 
     const originalPositions = useRef<Record<string, THREE.Vector3>>({});
     const originalRotations = useRef<Record<string, THREE.Euler>>({});
-    // Offset start positions (away from target)
     const startOffsets = useRef<Record<string, THREE.Vector3>>({});
 
     const partMeshes = useMemo(() => {
@@ -71,15 +73,36 @@ export const AssemblyScene = React.forwardRef<unknown, SceneProps>(
       return map;
     }, [gltf]);
 
-    // Record originals, generate random start offsets, dismantle
     useEffect(() => {
       if (dismantled.current) return;
+
+      // Realistic-ish material tuning: keep the GLB's own colors/textures
+      // but soften the shading response for a warm, cozy feel. We only
+      // adjust how the surface reacts to light, not the base color itself.
+      gltf.traverse((o: THREE.Object3D) => {
+        const mesh = o as THREE.Mesh;
+        const m = mesh.material as THREE.MeshStandardMaterial;
+        if (m && m.isMeshStandardMaterial) {
+          const name = mesh.name.toLowerCase();
+          if (name.includes('115980') || name.includes('bolt')) {
+            // Metal bolts: brushed, soft sheen (not mirror)
+            m.metalness = 0.6;
+            m.roughness = 0.45;
+          } else {
+            // Wood (table top + legs): warm matte, slight warmth in color
+            m.metalness = 0.0;
+            m.roughness = 0.7;
+            if (m.color) m.color.lerp(new THREE.Color('#e9c9a0'), 0.12);
+          }
+          m.needsUpdate = true;
+        }
+      });
+
       definition.steps.forEach((step: AssemblyStep, i: number) => {
         const m = partMeshes[step.meshName];
         if (m) {
           originalPositions.current[step.meshName] = m.position.clone();
           originalRotations.current[step.meshName] = m.rotation.clone();
-          // Generate offset: place parts spread out to the side
           const angle = (i / definition.steps.length) * Math.PI * 2;
           const radius = 0.6;
           startOffsets.current[step.meshName] = new THREE.Vector3(
@@ -107,83 +130,78 @@ export const AssemblyScene = React.forwardRef<unknown, SceneProps>(
 
     useFrame(() => {
       if (!assembly.current) return;
+      const a = assembly.current;
 
-      // Camera — strong auto-zoom + recenter on the focused hole
-      if (autoRotate && held) {
-        const step = stepById[held.stepId];
-        const origPos = step ? originalPositions.current[held.meshName] : null;
-        // Zoom in close
+      const focusing = autoRotate && !!held;
+
+      // ---- Camera ----
+      if (focusing) {
+        const step = stepById[held!.stepId];
+        const origPos = step ? originalPositions.current[held!.meshName] : null;
         autoZoomRef.current += (3.2 - autoZoomRef.current) * 0.1;
         camera.position.z = 2.0 / autoZoomRef.current;
-        // Aim camera at the target's current world position so the hole
-        // sits centered on screen
-        if (origPos && assembly.current) {
+        if (origPos) {
+          const socketLocal = new THREE.Vector3(origPos.x, 0.176, origPos.z);
           const worldTarget = new THREE.Vector3();
-          if (partMeshes[held.meshName]?.parent) {
-            partMeshes[held.meshName].parent!.localToWorld(
-              worldTarget.copy(origPos)
+          if (partMeshes[held!.meshName]?.parent) {
+            partMeshes[held!.meshName].parent!.localToWorld(
+              worldTarget.copy(socketLocal)
             );
           }
           camera.position.x += (worldTarget.x - camera.position.x) * 0.08;
-          camera.position.y +=
-            (worldTarget.y + 0.3 - camera.position.y) * 0.08;
+          camera.position.y += (worldTarget.y + 0.2 - camera.position.y) * 0.08;
           camera.lookAt(worldTarget);
         }
       } else {
         autoZoomRef.current = zoom;
         camera.position.z = 2.0 / zoom;
         camera.position.x = cameraOffset.current.x;
-        camera.position.y = 1.2 + cameraOffset.current.y;
-        // Look at a point that follows the pan offset so panning actually
-        // moves the view instead of fighting a fixed origin lookAt.
-        camera.lookAt(
-          cameraOffset.current.x,
-          cameraOffset.current.y,
-          0
-        );
+        camera.position.y = 0.2 + cameraOffset.current.y;
+        camera.lookAt(cameraOffset.current.x, cameraOffset.current.y, -1);
       }
 
+      // ---- Assembly orientation ----
       const j = joystick.current;
 
-      // Auto-rotate: orient so the highlighted target hole faces the camera.
-      // The bolt holes sit near the corners; we rotate the assembly so the
-      // chosen corner swings to the front and tilt to expose the hole.
-      if (autoRotate && held) {
-        const step = stepById[held.stepId];
-        const origPos = step ? originalPositions.current[held.meshName] : null;
+      if (focusing) {
+        const step = stepById[held!.stepId];
+        const origPos = step ? originalPositions.current[held!.meshName] : null;
         if (origPos) {
-          // Yaw: bring this corner to the front of the view
           const targetYaw = Math.atan2(origPos.x, origPos.z) + Math.PI;
-          let diff = targetYaw - assembly.current.rotation.y;
+          let diff = targetYaw - a.rotation.y;
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
-          assembly.current.rotation.y += diff * 0.1;
-
-          // Flip the table so the hole faces the camera.
-          // Tilt back (negative) so we look slightly up at the underside
-          // where the bolt threads into.
-          const desiredTilt = -0.9;
-          assembly.current.rotation.x +=
-            (desiredTilt - assembly.current.rotation.x) * 0.1;
-
-          // Shift assembly down a touch so the focused corner sits centered
-          assembly.current.position.y +=
-            (-0.15 - assembly.current.position.y) * 0.1;
+          a.rotation.y += diff * 0.1;
+          a.rotation.x += (-0.9 - a.rotation.x) * 0.1;
+          a.position.y += (-0.15 - a.position.y) * 0.1;
+        }
+      } else if (resetRequested.current || completed) {
+        // Smoothly return to the default upright, centered view
+        a.rotation.x += (0 - a.rotation.x) * 0.12;
+        a.rotation.y += (0 - a.rotation.y) * 0.12;
+        a.position.x += (0 - a.position.x) * 0.12;
+        a.position.y += (0 - a.position.y) * 0.12;
+        a.position.z += (0 - a.position.z) * 0.12;
+        if (
+          Math.abs(a.rotation.x) < 0.01 &&
+          Math.abs(a.rotation.y) < 0.01 &&
+          Math.abs(a.position.y) < 0.01
+        ) {
+          resetRequested.current = false;
         }
       } else {
-        // Ease assembly position back to center when not auto-focusing
-        assembly.current.position.y +=
-          (0 - assembly.current.position.y) * 0.1;
+        a.position.y += (0 - a.position.y) * 0.1;
         if (Math.abs(j.x) > 0.01 || Math.abs(j.y) > 0.01) {
-          assembly.current.rotation.y += j.x * 0.06;
-          assembly.current.rotation.x = THREE.MathUtils.clamp(
-            assembly.current.rotation.x + j.y * 0.04,
+          a.rotation.y += j.x * 0.06;
+          a.rotation.x = THREE.MathUtils.clamp(
+            a.rotation.x + j.y * 0.04,
             -Math.PI,
             Math.PI
           );
         }
       }
 
+      // ---- Held part handling ----
       if (!held) {
         hideGhost();
         return;
@@ -199,55 +217,40 @@ export const AssemblyScene = React.forwardRef<unknown, SceneProps>(
 
       partMesh.visible = true;
 
-      // In screwing state: screw spins on its long axis and drives forward
       if (snapState === 'screwing') {
         const origRot = originalRotations.current[held.meshName];
         if (origRot) {
-          // Reset to original orientation each frame
           partMesh.rotation.copy(origRot);
-          // Then twist around the WORLD vertical axis (true helical spin).
-          // rotateOnWorldAxis keeps the spin vertical regardless of how the
-          // part's local axes are oriented in the GLB.
           partMesh.rotateOnWorldAxis(
             new THREE.Vector3(0, 1, 0),
             rotationProgress * Math.PI * 4
           );
         }
-        // Drive from just below the surface upward into place
         const driveDist = 0.03 * (1 - rotationProgress);
         partMesh.position.set(origPos.x, origPos.y - driveDist, origPos.z);
-
-        if (rotationProgress > 0.8) {
-          tintObj(partMesh, GREEN);
-        } else {
-          tintObj(partMesh, BLUE);
-        }
+        if (rotationProgress > 0.8) tintObj(partMesh, GREEN);
+        else tintObj(partMesh, BLUE);
         hideGhost();
         return;
       }
 
-      // Show ghost at target
       showGhostAtOriginal(origPos, partMesh);
 
       const ndc = pointerNDC.current;
       if (ndc) {
         const targetWorld = new THREE.Vector3();
         partMesh.parent.localToWorld(targetWorld.copy(origPos));
-
         const planeNormal = camera.position.clone().sub(targetWorld).normalize();
         const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
           planeNormal,
           targetWorld
         );
-
         raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), camera);
         const hit = new THREE.Vector3();
         raycaster.ray.intersectPlane(plane, hit);
-
         if (hit) {
           const localHit = partMesh.parent.worldToLocal(hit);
           partMesh.position.copy(localHit);
-
           const dist = partMesh.position.distanceTo(origPos);
           if (dist < 0.12) {
             setSnapState('near_correct');
@@ -261,7 +264,6 @@ export const AssemblyScene = React.forwardRef<unknown, SceneProps>(
           }
         }
       } else if (startPos) {
-        // No touch yet — show part at offset start position (no spinning)
         partMesh.position.copy(startPos);
         const origRot = originalRotations.current[held.meshName];
         if (origRot) partMesh.rotation.copy(origRot);
@@ -294,7 +296,8 @@ export const AssemblyScene = React.forwardRef<unknown, SceneProps>(
         ghostRef.current.removeFromParent();
         parent.add(ghostRef.current);
       }
-      ghostRef.current.position.copy(origPos);
+      const SOCKET_Y = 0.176;
+      ghostRef.current.position.set(origPos.x, SOCKET_Y, origPos.z);
       ghostRef.current.visible = true;
       const t = Date.now() * 0.004;
       ghostRef.current.scale.setScalar(1 + 0.3 * Math.sin(t));
@@ -322,7 +325,6 @@ export const AssemblyScene = React.forwardRef<unknown, SceneProps>(
       if (!partMesh) return;
       const orig = originalPositions.current[step.meshName];
       if (orig) partMesh.position.copy(orig);
-      // Snap rotation back to exact original (clean finish after screwing spin)
       const origRot = originalRotations.current[step.meshName];
       if (origRot) partMesh.rotation.copy(origRot);
       clearTintObj(partMesh);
@@ -351,8 +353,15 @@ export const AssemblyScene = React.forwardRef<unknown, SceneProps>(
     }
 
     function resetView(): void {
+      // Request a smooth return to the default centered/upright view.
+      resetRequested.current = true;
+      autoZoomRef.current = 1;
+      // Snap the camera to the default framing immediately so the table
+      // isn't left low/off-screen from a previous auto-view aim.
+      camera.position.set(0, 0.2, 2.0);
+      camera.lookAt(0, 0, -1);
       if (assembly.current) {
-        assembly.current.rotation.set(0, 0, 0);
+        assembly.current.position.set(0, 0, 0);
       }
     }
 
@@ -365,8 +374,8 @@ export const AssemblyScene = React.forwardRef<unknown, SceneProps>(
     return (
       <group ref={assembly}>
         <primitive object={gltf} />
-        <directionalLight position={[0, -3, 0]} intensity={0.4} color="#8899bb" />
-        <ambientLight intensity={0.15} />
+        {/* Soft warm under-fill so the underside reads cozy, not black */}
+        <directionalLight position={[0, -3, 1]} intensity={0.35} color="#f0c79a" />
       </group>
     );
   }

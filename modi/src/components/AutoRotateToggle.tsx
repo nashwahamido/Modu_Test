@@ -15,7 +15,6 @@ export function AutoRotateToggle() {
       onPress={toggleAutoRotate}
       style={[styles.button, autoRotate && styles.buttonActive]}
     >
-      <Text style={styles.icon}>🎥</Text>
       <Text style={[styles.label, autoRotate && styles.labelActive]}>
         {autoRotate ? 'Auto-view ON' : 'Auto-view'}
       </Text>
@@ -25,11 +24,8 @@ export function AutoRotateToggle() {
 
 const styles = StyleSheet.create({
   button: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1,
@@ -39,7 +35,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(100,160,255,0.2)',
     borderColor: 'rgba(100,160,255,0.6)',
   },
-  icon: { fontSize: 13 },
   label: {
     color: 'rgba(255,255,255,0.6)',
     fontSize: 11,
