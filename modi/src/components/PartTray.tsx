@@ -1,5 +1,15 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, Image } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  ScrollView,
+  Image,
+} from 'react-native';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
+import type { useSharedValue } from 'react-native-worklets-core';
 import { AssemblyDefinition, AssemblyStep } from '../data/lackAssembly';
 import { useAssemblyStore } from '../store/assemblyStore';
 
@@ -8,18 +18,38 @@ import { useAssemblyStore } from '../store/assemblyStore';
 const BOLT_THUMB = require('../../assets/parts/bolt.png');
 const LEG_THUMB = require('../../assets/parts/leg.png');
 
+/**
+ * When provided, pending chips can be DRAGGED onto the canvas: the part is
+ * picked up and follows the finger in 3D (V2 Filament screen). When absent,
+ * chips fall back to tap-to-pick-up (expo-gl / combined-Filament screens).
+ *
+ * heldX / heldZ are the same worklets-core shared values the Scene uses to
+ * position the held part, so writing them here moves the part live.
+ */
+interface DragControls {
+  heldX: ReturnType<typeof useSharedValue<number>>;
+  heldZ: ReturnType<typeof useSharedValue<number>>;
+  isHolding: ReturnType<typeof useSharedValue<boolean>>;
+  screenW: number;
+  screenH: number;
+  /** How far (in world units) the part travels from screen-centre to edge. */
+  rangeX?: number;
+  rangeZ?: number;
+}
+
 interface TrayProps {
   definition: AssemblyDefinition;
   onPickupPart: (step: AssemblyStep) => void;
+  dragControls?: DragControls;
 }
 
 /**
  * Right-side part tray.
  * Normal mode: shows all parts (locked ones are dimmed).
  * Focus mode: shows only the current pending part.
- * Tapping a pending part picks it up.
+ * Pending parts can be dragged onto the canvas (or tapped to drop to centre).
  */
-export function PartTray({ definition, onPickupPart }: TrayProps) {
+export function PartTray({ definition, onPickupPart, dragControls }: TrayProps) {
   const statuses = useAssemblyStore((s) => s.statuses);
   const focusMode = useAssemblyStore((s) => s.focusMode);
 
@@ -39,20 +69,16 @@ export function PartTray({ definition, onPickupPart }: TrayProps) {
           const isPending = status === 'pending';
           const isBolt = step.partNumber === '115980';
           const thumbSource = isBolt ? BOLT_THUMB : LEG_THUMB;
-          return (
-            <Pressable
-              key={step.id}
-              disabled={!isPending}
-              onPress={() => {
-                if (isPending) onPickupPart(step);
-              }}
-              style={[
-                styles.chip,
-                status === 'done' && styles.chipDone,
-                status === 'locked' && styles.chipLocked,
-                isPending && styles.chipActive,
-              ]}
-            >
+
+          const chipStyle = [
+            styles.chip,
+            status === 'done' && styles.chipDone,
+            status === 'locked' && styles.chipLocked,
+            isPending && styles.chipActive,
+          ];
+
+          const chipInner = (
+            <>
               <View style={styles.iconContainer}>
                 <Image
                   source={thumbSource}
@@ -63,7 +89,70 @@ export function PartTray({ definition, onPickupPart }: TrayProps) {
               <Text style={styles.partLabel}>{step.label}</Text>
               <Text style={styles.partNo}>#{step.partNumber}</Text>
               {status === 'done' && <Text style={styles.check}>✓</Text>}
-              {isPending && <Text style={styles.tapHint}>TAP</Text>}
+              {isPending && (
+                <Text style={styles.tapHint}>
+                  {dragControls ? 'DRAG' : 'TAP'}
+                </Text>
+              )}
+            </>
+          );
+
+          // ---- Drag-enabled path (V2): pending chips drag onto the canvas ----
+          if (dragControls && isPending) {
+            const { heldX, heldZ, isHolding, screenW, screenH } = dragControls;
+            const rangeX = dragControls.rangeX ?? 1.6;
+            const rangeZ = dragControls.rangeZ ?? 1.1;
+            const halfW = screenW / 2;
+            const halfH = screenH / 2;
+
+            // Map the finger's absolute screen position to a world offset so
+            // the part appears roughly under the finger. Activates on a small
+            // horizontal pull (toward the canvas, which is left of the tray),
+            // leaving vertical movement to the ScrollView.
+            const pan = Gesture.Pan()
+              .activeOffsetX([-15, 15])
+              .onStart((e) => {
+                'worklet';
+                runOnJS(onPickupPart)(step);
+                isHolding.value = true;
+                heldX.value = ((e.absoluteX - halfW) / halfW) * rangeX;
+                heldZ.value = ((e.absoluteY - halfH) / halfH) * rangeZ;
+              })
+              .onUpdate((e) => {
+                'worklet';
+                heldX.value = ((e.absoluteX - halfW) / halfW) * rangeX;
+                heldZ.value = ((e.absoluteY - halfH) / halfH) * rangeZ;
+              });
+
+            // Plain tap drops the part to centre (accessibility fallback).
+            const tap = Gesture.Tap().onEnd(() => {
+              'worklet';
+              runOnJS(onPickupPart)(step);
+              isHolding.value = true;
+              heldX.value = 0;
+              heldZ.value = 0;
+            });
+
+            const chipGesture = Gesture.Exclusive(pan, tap);
+
+            return (
+              <GestureDetector key={step.id} gesture={chipGesture}>
+                <View style={chipStyle}>{chipInner}</View>
+              </GestureDetector>
+            );
+          }
+
+          // ---- Tap-only fallback (other screens, or non-pending chips) ----
+          return (
+            <Pressable
+              key={step.id}
+              disabled={!isPending}
+              onPress={() => {
+                if (isPending) onPickupPart(step);
+              }}
+              style={chipStyle}
+            >
+              {chipInner}
             </Pressable>
           );
         })}

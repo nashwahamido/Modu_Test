@@ -35,6 +35,11 @@ function Scene({
   slideZ,
   accumSpin,
   accumTilt,
+  heldX,
+  heldY,
+  heldZ,
+  heldSpin,
+  isHolding,
 }: {
   joyX: ReturnType<typeof useSharedValue<number>>;
   joyY: ReturnType<typeof useSharedValue<number>>;
@@ -42,6 +47,13 @@ function Scene({
   slideZ: ReturnType<typeof useSharedValue<number>>;
   accumSpin: ReturnType<typeof useSharedValue<number>>;
   accumTilt: ReturnType<typeof useSharedValue<number>>;
+  // Held-part transform — lifted to AssemblyV2 so the PartTray's drag gesture
+  // can drive the part's position directly while it's being dragged in.
+  heldX: ReturnType<typeof useSharedValue<number>>;
+  heldY: ReturnType<typeof useSharedValue<number>>;
+  heldZ: ReturnType<typeof useSharedValue<number>>;
+  heldSpin: ReturnType<typeof useSharedValue<number>>;
+  isHolding: ReturnType<typeof useSharedValue<boolean>>;
 }) {
   const cameraManipulator = useCameraManipulator({
     orbitHomePosition: [0, 1.5, 5],
@@ -63,12 +75,8 @@ function Scene({
   const held = useAssemblyStore((s) => s.held);
   const isBolt = held?.meshName?.startsWith('115980');
 
-  // Held part position (driven by drag) + twist rotation
-  const heldX = useSharedValue(0);
-  const heldY = useSharedValue(0);
-  const heldZ = useSharedValue(0);
-  const heldSpin = useSharedValue(0); // twist-to-screw rotation
-  const isHolding = useSharedValue(false); // worklet-readable held flag
+  // Held part transform values now come in as props (created in AssemblyV2),
+  // so the PartTray drag gesture and this Scene share the same values.
 
   // With conditional rendering (only the held part's ModelRenderer mounts),
   // we don't manually add/remove entities — we just track held state.
@@ -82,8 +90,9 @@ function Scene({
       return;
     }
     shownName.current = held.meshName;
-    heldX.value = 0;
-    heldZ.value = 0;
+    // NOTE: do NOT reset heldX/heldZ here. Placement is set by whoever picked
+    // the part up — the tray's tap handler centres it (0,0); the tray's drag
+    // gesture writes the finger position. Zeroing here would fight the drag.
     isHolding.value = true;
     // eslint-disable-next-line no-console
     console.log('V2 HELD —', held.meshName, 'isBolt:', isBolt);
@@ -249,6 +258,16 @@ export function AssemblyV2() {
   const accumSpin = useSharedValue(0);
   const accumTilt = useSharedValue(0);
 
+  // Held-part transform — shared with the Scene (which renders the part) and
+  // the PartTray (whose drag gesture moves it while being dragged in).
+  const heldX = useSharedValue(0);
+  const heldY = useSharedValue(0);
+  const heldZ = useSharedValue(0);
+  const heldSpin = useSharedValue(0);
+  const isHolding = useSharedValue(false);
+
+  const { width: screenW, height: screenH } = Dimensions.get('window');
+
   useEffect(() => {
     store.init(def);
   }, []);
@@ -286,6 +305,11 @@ export function AssemblyV2() {
           slideZ={slideZ}
           accumSpin={accumSpin}
           accumTilt={accumTilt}
+          heldX={heldX}
+          heldY={heldY}
+          heldZ={heldZ}
+          heldSpin={heldSpin}
+          isHolding={isHolding}
         />
       </FilamentScene>
 
@@ -301,7 +325,7 @@ export function AssemblyV2() {
           <Text style={styles.sub}>
             {store.completed
               ? 'Great work!'
-              : `Step ${stepNumber} of ${totalSteps} · Tap a part to start`}
+              : `Step ${stepNumber} of ${totalSteps} · Drag a part onto the table`}
           </Text>
         )}
         {store.guidanceOn && held && !isScrewing && (
@@ -341,7 +365,11 @@ export function AssemblyV2() {
         <FocusModeToggle />
       </View>
 
-      <PartTray definition={def} onPickupPart={handlePickup} />
+      <PartTray
+        definition={def}
+        onPickupPart={handlePickup}
+        dragControls={{ heldX, heldZ, isHolding, screenW, screenH }}
+      />
 
       <JoystickShared outX={joyX} outY={joyY} />
     </View>
