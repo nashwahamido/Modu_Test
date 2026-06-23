@@ -80,6 +80,11 @@ const styles = StyleSheet.create({
     bottom: 8,
     width: 80,
     justifyContent: 'center',
+    zIndex: 1000,
+    elevation: 1000,
+    // TEMP: visible backing so we can confirm the tray renders
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    borderRadius: 12,
   },
   scrollContent: {
     gap: 6,

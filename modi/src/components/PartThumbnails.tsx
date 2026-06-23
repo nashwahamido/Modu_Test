@@ -1,160 +1,152 @@
-import React, { useRef, useState, useCallback } from 'react';
-import { View, StyleSheet } from 'react-native';
-import { Canvas, useThree, useFrame } from '@react-three/fiber/native';
-import { useGLTF } from '@react-three/drei/native';
-import * as THREE from 'three';
-
-interface ThumbnailsProps {
-  glbUrl: string;
-  /** Mesh name to render for the "bolt" thumbnail */
-  boltMesh: string;
-  /** Mesh name to render for the "leg" thumbnail */
-  legMesh: string;
-  /** Called once with { bolt, leg } data-URI strings when both are ready */
-  onReady: (uris: { bolt: string | null; leg: string | null }) => void;
-}
+import React, { useRef, useCallback } from 'react';
+import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import {
+  FilamentScene,
+  FilamentView,
+  Model,
+  Camera,
+  DefaultLight,
+  useCameraManipulator,
+  RenderCallback,
+  Float3,
+} from 'react-native-filament';
+import { useSharedValue } from 'react-native-worklets-core';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { LACK_ASSEMBLY } from '../data/lackAssembly';
+import { JoystickShared } from './JoystickShared';
 
 /**
- * Renders the two distinct part shapes (a hanger bolt and a leg) off-screen,
- * captures each to a PNG data-URI once, and reports them back via onReady.
- * The tray then displays these as cheap static <Image> thumbnails instead of
- * placeholder icons.
+ * Control scheme (minimal, docs-correct version):
+ *   • Left thumb joystick   → rotates the MODEL (spin + tilt)
+ *   • Right one-finger drag → slides the MODEL across the floor
+ *   • Right two-finger pinch → zooms the camera
  *
- * Mount this once (e.g. in AssemblyScreen) inside a tiny hidden View.
+ * Transform updates happen INSIDE the renderCallback worklet (per RNF docs),
+ * reading joystick + drag shared values and writing the Model's rotate/translate
+ * shared values. Uses the simple <Model> prop API (no useModel/transformManager).
  */
-export function PartThumbnails({
-  glbUrl,
-  boltMesh,
-  legMesh,
-  onReady,
-}: ThumbnailsProps) {
-  const [done, setDone] = useState(false);
+function Scene({
+  joyX,
+  joyY,
+}: {
+  joyX: ReturnType<typeof useSharedValue<number>>;
+  joyY: ReturnType<typeof useSharedValue<number>>;
+}) {
+  const cameraManipulator = useCameraManipulator({
+    orbitHomePosition: [0, 1.5, 5],
+    targetPosition: [0, 0, 0],
+    orbitSpeed: [0.003, 0.003],
+  });
 
-  if (done) return null;
+  const viewHeight = Dimensions.get('window').height;
+  const viewWidth = Dimensions.get('window').width;
+
+  // Model transform shared values (read by <Model> via props)
+  const rotation = useSharedValue<Float3>([0, 0, 0]);
+  const translation = useSharedValue<Float3>([0, 0, 0]);
+
+  // Drag offset shared values, written by the pan gesture
+  const slideX = useSharedValue(0);
+  const slideZ = useSharedValue(0);
+
+  // Accumulated rotation, persisted in the worklet across frames
+  const accumSpin = useSharedValue(0);
+  const accumTilt = useSharedValue(0);
+
+  // Per-frame worklet: read joystick + drag shared values, update the
+  // model's transform shared values. (No multiplyWithCurrentTransform here;
+  // we set absolute rotation/translation each frame.)
+  const renderCallback: RenderCallback = useCallback(() => {
+    'worklet';
+    accumSpin.value += joyX.value * 0.04;
+    accumTilt.value += joyY.value * 0.04;
+    const lim = Math.PI / 2;
+    if (accumTilt.value > lim) accumTilt.value = lim;
+    if (accumTilt.value < -lim) accumTilt.value = -lim;
+    rotation.value = [accumTilt.value, accumSpin.value, 0];
+    translation.value = [slideX.value, 0, slideZ.value];
+  }, [joyX, joyY, slideX, slideZ, accumSpin, accumTilt, rotation, translation]);
+
+  // Right one-finger drag → slide
+  const dragStartX = useRef(0);
+  const dragStartZ = useRef(0);
+  const panGesture = Gesture.Pan()
+    .minPointers(1)
+    .maxPointers(1)
+    .onBegin(() => {
+      dragStartX.current = slideX.value;
+      dragStartZ.current = slideZ.value;
+    })
+    .onUpdate((e) => {
+      slideX.value = dragStartX.current + e.translationX * 0.01;
+      slideZ.value = dragStartZ.current + e.translationY * 0.01;
+    });
+
+  // Pinch zoom (camera)
+  const lastScale = useRef(1);
+  const pinchGesture = Gesture.Pinch()
+    .onBegin((e) => {
+      lastScale.current = e.scale || 1;
+    })
+    .onUpdate((e) => {
+      const scale = e.scale || 1;
+      const ratio = scale / lastScale.current;
+      lastScale.current = scale;
+      const step = (ratio - 1) * 400;
+      cameraManipulator?.scroll(viewWidth / 2, viewHeight / 2, -step);
+    });
+
+  const combinedGesture = Gesture.Simultaneous(panGesture, pinchGesture);
 
   return (
-    <View style={styles.hidden} pointerEvents="none">
-      <Canvas
-        camera={{ position: [0, 0, 1.2], fov: 35 }}
-        gl={{ alpha: true, preserveDrawingBuffer: true }}
-        style={{ width: 128, height: 128, backgroundColor: 'transparent' }}
-      >
-        <ambientLight intensity={0.8} color="#fff2e0" />
-        <directionalLight position={[2, 3, 4]} intensity={1.0} color="#ffd9a0" />
-        <directionalLight position={[-2, 1, -2]} intensity={0.3} color="#ffcaa0" />
-        <React.Suspense fallback={null}>
-          <Capturer
-            glbUrl={glbUrl}
-            boltMesh={boltMesh}
-            legMesh={legMesh}
-            onReady={(uris) => {
-              onReady(uris);
-              setDone(true);
-            }}
-          />
-        </React.Suspense>
-      </Canvas>
+    <GestureDetector gesture={combinedGesture}>
+      <FilamentView style={styles.filament} renderCallback={renderCallback}>
+        <Camera cameraManipulator={cameraManipulator} />
+        <DefaultLight />
+        <Model
+          source={{ uri: LACK_ASSEMBLY.glbUrl }}
+          transformToUnitCube
+          rotate={rotation}
+          translate={translation}
+          multiplyWithCurrentTransform={false}
+        />
+      </FilamentView>
+    </GestureDetector>
+  );
+}
+
+export function FilamentTestScreen() {
+  const joyX = useSharedValue(0);
+  const joyY = useSharedValue(0);
+
+  return (
+    <View style={styles.root}>
+      <FilamentScene>
+        <Scene joyX={joyX} joyY={joyY} />
+      </FilamentScene>
+
+      <JoystickShared outX={joyX} outY={joyY} />
+
+      <View style={styles.banner} pointerEvents="none">
+        <Text style={styles.bannerText}>
+          M2.5 — joystick: rotate · drag: slide · pinch: zoom
+        </Text>
+      </View>
     </View>
   );
 }
 
-function Capturer({
-  glbUrl,
-  boltMesh,
-  legMesh,
-  onReady,
-}: ThumbnailsProps) {
-  const { scene: gltf } = useGLTF(glbUrl);
-  const { gl, scene, camera } = useThree();
-  const groupRef = useRef<THREE.Group>(null);
-  const phase = useRef<'bolt' | 'leg' | 'finished'>('bolt');
-  const frame = useRef(0);
-  const result = useRef<{ bolt: string | null; leg: string | null }>({
-    bolt: null,
-    leg: null,
-  });
-
-  // Build a centered clone of one named mesh, framed to fill the view.
-  const buildIsolated = useCallback(
-    (meshName: string): THREE.Object3D | null => {
-      let found: THREE.Object3D | null = null;
-      gltf.traverse((o: THREE.Object3D) => {
-        if (o.name === meshName) found = o;
-      });
-      if (!found) return null;
-
-      const clone = (found as THREE.Object3D).clone(true);
-      clone.position.set(0, 0, 0);
-      clone.rotation.set(0, 0, 0);
-      clone.visible = true;
-
-      // Center + scale to fit using bounding box
-      const box = new THREE.Box3().setFromObject(clone);
-      const size = new THREE.Vector3();
-      const center = new THREE.Vector3();
-      box.getSize(size);
-      box.getCenter(center);
-      clone.position.sub(center);
-
-      const maxDim = Math.max(size.x, size.y, size.z) || 1;
-      const targetSize = 0.8;
-      const s = targetSize / maxDim;
-      const wrapper = new THREE.Group();
-      wrapper.add(clone);
-      wrapper.scale.setScalar(s);
-      // Slight 3/4 tilt so it reads as 3D
-      wrapper.rotation.set(0.4, 0.7, 0);
-      return wrapper;
-    },
-    [gltf]
-  );
-
-  useFrame(() => {
-    if (phase.current === 'finished' || !groupRef.current) return;
-
-    frame.current += 1;
-
-    // Mount the current part on frame 1 of its phase
-    if (frame.current === 1) {
-      const name = phase.current === 'bolt' ? boltMesh : legMesh;
-      const obj = buildIsolated(name);
-      groupRef.current.clear();
-      if (obj) groupRef.current.add(obj);
-    }
-
-    // Capture a couple frames later so it has rendered
-    if (frame.current === 4) {
-      try {
-        const canvas: any = (gl as any).domElement || (gl as any).canvas;
-        if (canvas && canvas.toDataURL) {
-          const uri = canvas.toDataURL('image/png');
-          if (phase.current === 'bolt') result.current.bolt = uri;
-          else result.current.leg = uri;
-        }
-      } catch (e) {
-        // capture not supported; leave null → tray falls back to icons
-      }
-
-      if (phase.current === 'bolt') {
-        phase.current = 'leg';
-        frame.current = 0;
-      } else {
-        phase.current = 'finished';
-        onReady(result.current);
-      }
-    }
-  });
-
-  return <group ref={groupRef} />;
-}
-
 const styles = StyleSheet.create({
-  hidden: {
+  root: { flex: 1, backgroundColor: '#6f8a68' },
+  filament: { flex: 1 },
+  banner: {
     position: 'absolute',
-    width: 128,
-    height: 128,
-    opacity: 0,
-    left: -200, // off-screen
-    top: -200,
+    top: 12,
+    left: 12,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
   },
+  bannerText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 });

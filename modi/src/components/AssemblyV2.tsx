@@ -22,10 +22,11 @@ import { AutoRotateToggle } from './AutoRotateToggle';
 import { HintsToggle } from './HintsToggle';
 
 /**
- * Full assembly screen on Filament: the working 3D controls (joystick rotate,
- * drag-pan, pinch-zoom) plus dismantle, with the COMPLETE expo-gl UI overlay
- * (step panel, progress bar, XP, toggles, parts tray) layered on top. All UI
- * reads the Zustand store, exactly like the expo-gl AssemblyScreen.
+ * ASSEMBLY V2 — rebuilt from INDIVIDUAL standalone models.
+ *
+ * MILESTONE 1: load only the standalone Tabletop.glb and prove it renders
+ * correctly (scale, orientation, lighting) with joystick rotate + drag-pan +
+ * pinch-zoom. No parts yet — this is the foundation everything else builds on.
  */
 function Scene({
   joyX,
@@ -34,7 +35,6 @@ function Scene({
   slideZ,
   accumSpin,
   accumTilt,
-  cameraManipulatorRef,
 }: {
   joyX: ReturnType<typeof useSharedValue<number>>;
   joyY: ReturnType<typeof useSharedValue<number>>;
@@ -42,155 +42,58 @@ function Scene({
   slideZ: ReturnType<typeof useSharedValue<number>>;
   accumSpin: ReturnType<typeof useSharedValue<number>>;
   accumTilt: ReturnType<typeof useSharedValue<number>>;
-  cameraManipulatorRef: React.MutableRefObject<any>;
 }) {
   const cameraManipulator = useCameraManipulator({
     orbitHomePosition: [0, 1.5, 5],
     targetPosition: [0, 0, 0],
     orbitSpeed: [0.003, 0.003],
   });
-  // expose for the Reset button
-  cameraManipulatorRef.current = cameraManipulator;
 
   const viewHeight = Dimensions.get('window').height;
   const viewWidth = Dimensions.get('window').width;
 
-  const model = useModel({ uri: LACK_ASSEMBLY.glbUrl });
-  const { transformManager, scene, renderableManager } = useFilamentContext();
+  // Load ONLY the standalone tabletop. The held part is loaded separately by
+  // the HeldPart component, which only mounts when a part is held (loading a
+  // model via useModel immediately adds it to the scene, so we must not load
+  // the parts until they're actually needed).
+  const tabletop = useModel({ uri: LACK_ASSEMBLY.tabletopModelUrl });
+  const { transformManager, scene } = useFilamentContext();
 
-  // ---- Highlight the current target hole (tint its socket entity green).
-  // SAFE PROBE: tries baseColorFactor; logs if the material has no such
-  // parameter rather than crashing. Tells us if runtime tinting works.
-  const currentStep = useAssemblyStore((s) => s.currentStep());
-  const highlighted = useRef<string | null>(null);
-  useEffect(() => {
-    if (model.state !== 'loaded') return;
-    if (!currentStep) return;
-    const socket = currentStep.socketName;
-    if (highlighted.current === socket) return;
-    highlighted.current = socket;
-    try {
-      const asset = model.asset;
-      const e = asset.getFirstEntityByName(socket);
-      if (e == null) {
-        console.log('HIGHLIGHT — socket entity not found:', socket);
-        return;
-      }
-      const count = renderableManager.getPrimitiveCount(e);
-      console.log('HIGHLIGHT — socket', socket, 'primitives:', count);
-      const mi = renderableManager.getMaterialInstanceAt(e, 0);
-      try {
-        // subtle green tint (not a solid block)
-        mi.setFloat4Parameter('baseColorFactor', [0.55, 0.85, 0.55, 1.0]);
-        console.log('HIGHLIGHT — baseColorFactor set OK on', socket);
-      } catch (paramErr) {
-        console.log('HIGHLIGHT — baseColorFactor failed:', String(paramErr));
-      }
-    } catch (err) {
-      console.log('HIGHLIGHT error:', err);
-    }
-    // Touching the asset's materials can re-add entities to the scene, which
-    // would re-assemble the table. Re-hide the parts right after highlighting.
-    try {
-      const asset = model.asset;
-      LACK_ASSEMBLY.steps.forEach((step) => {
-        const e = asset.getFirstEntityByName(step.meshName);
-        if (e != null) scene.removeEntity(e);
-      });
-      console.log('HIGHLIGHT — re-hid parts after tint');
-    } catch {}
-  }, [currentStep, model, renderableManager, scene]);
-
-  // ---- Dismantle on load: hide all assembly parts, keep only the base.
-  const dismantled = useRef(false);
-  useEffect(() => {
-    if (model.state !== 'loaded' || dismantled.current) return;
-    dismantled.current = true;
-    const hideAll = () => {
-      try {
-        const asset = model.asset;
-        let n = 0;
-        LACK_ASSEMBLY.steps.forEach((step) => {
-          const e = asset.getFirstEntityByName(step.meshName);
-          if (e != null) {
-            scene.removeEntity(e);
-            n += 1;
-          }
-        });
-        // eslint-disable-next-line no-console
-        console.log('DISMANTLE — hid', n, 'parts');
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.log('DISMANTLE error:', e);
-      }
-    };
-    hideAll();
-    const t1 = setTimeout(hideAll, 100);
-    const t2 = setTimeout(hideAll, 500);
-    const t3 = setTimeout(hideAll, 1000);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-    };
-  }, [model, scene]);
-
-  // ---- Show the held part: when the store's `held` changes, un-hide that
-  // part and lift it above its socket so it's clearly "picked up".
+  // Which part is held (from the store).
   const held = useAssemblyStore((s) => s.held);
-  const shownPart = useRef<string | null>(null);
-  // Held part state. We pass the mesh NAME (a plain string, safe across the
-  // worklet boundary) and let the render worklet look up the native entity
-  // itself each frame — native entities can't be stored in shared values.
-  const heldName = useSharedValue<string>('');
+  const isBolt = held?.meshName?.startsWith('115980');
+
+  // Held part position (driven by drag) + twist rotation
   const heldX = useSharedValue(0);
-  const heldY = useSharedValue(0.4);
+  const heldY = useSharedValue(0);
   const heldZ = useSharedValue(0);
-  const heldRotX = useSharedValue(Math.PI / 2); // stand the part upright
-  const isHolding = useSharedValue(false);
+  const heldSpin = useSharedValue(0); // twist-to-screw rotation
+  const isHolding = useSharedValue(false); // worklet-readable held flag
+
+  // With conditional rendering (only the held part's ModelRenderer mounts),
+  // we don't manually add/remove entities — we just track held state.
+  const shownName = useRef<string | null>(null);
   useEffect(() => {
-    if (model.state !== 'loaded') return;
     if (!held) {
-      // Cancelled — re-hide the part that was shown and reset drag state.
-      if (shownPart.current) {
-        try {
-          const prev = model.asset.getFirstEntityByName(shownPart.current);
-          if (prev != null) scene.removeEntity(prev);
-        } catch {}
-        shownPart.current = null;
-      }
-      heldName.value = '';
+      shownName.current = null;
+      heldX.value = 0;
+      heldZ.value = 0;
       isHolding.value = false;
       return;
     }
-    if (shownPart.current === held.meshName) return;
-    shownPart.current = held.meshName;
-    try {
-      const asset = model.asset;
-      const e = asset.getFirstEntityByName(held.meshName);
-      if (e != null) {
-        scene.addEntity(e);
-        heldX.value = 0;
-        heldY.value = 0.4;
-        heldZ.value = 0;
-        heldName.value = held.meshName;
-        isHolding.value = true;
-        // eslint-disable-next-line no-console
-        console.log('SHOW PART —', held.meshName, 'shown, id', e.id);
-      } else {
-        // eslint-disable-next-line no-console
-        console.log('SHOW PART — entity not found:', held.meshName);
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.log('SHOW PART error:', err);
-    }
-  }, [held, model, scene, transformManager]);
+    shownName.current = held.meshName;
+    heldX.value = 0;
+    heldZ.value = 0;
+    isHolding.value = true;
+    // eslint-disable-next-line no-console
+    console.log('V2 HELD —', held.meshName, 'isBolt:', isBolt);
+  }, [held, isBolt]);
+
 
   const renderCallback: RenderCallback = useCallback(() => {
     'worklet';
-    if (model.state !== 'loaded') return;
-    const root = model.rootEntity;
+    if (tabletop.state !== 'loaded') return;
+    const root = tabletop.rootEntity;
 
     accumSpin.value += joyX.value * 0.04;
     accumTilt.value -= joyY.value * 0.04;
@@ -198,7 +101,7 @@ function Scene({
     if (accumTilt.value > lim) accumTilt.value = lim;
     if (accumTilt.value < -lim) accumTilt.value = -lim;
 
-    const he = model.boundingBox.halfExtent;
+    const he = tabletop.boundingBox.halfExtent;
     const maxHalf = Math.max(he[0], he[1], he[2]) || 1;
     const s = 0.5 / maxHalf;
 
@@ -208,25 +111,8 @@ function Scene({
     m = m.rotate(accumSpin.value, [0, 1, 0]);
     m = m.translate([slideX.value, 0, slideZ.value]);
     transformManager.setTransform(root, m);
-
-    // If a part is held, look up its native entity (by name, inside the
-    // worklet) and position it.
-    if (isHolding.value && heldName.value !== '') {
-      const part = model.asset.getFirstEntityByName(heldName.value);
-      if (part != null) {
-        // DIAGNOSTIC: apply a LARGE CONSTANT tilt (1.2 rad ~ 69°) to the part,
-        // independent of the table. If the part visibly tilts by this fixed
-        // amount, setTransform IS controlling its rotation (local) and we can
-        // counter-rotate. If it ignores this, setTransform doesn't drive its
-        // rotation the way we assumed.
-        let pm = transformManager.createIdentityMatrix();
-        pm = pm.translate([heldX.value, heldY.value, heldZ.value]);
-        pm = pm.rotate(1.2, [0, 0, 1]); // constant roll — should be obvious
-        transformManager.setTransform(part, pm);
-      }
-    }
   }, [
-    model,
+    tabletop,
     transformManager,
     joyX,
     joyY,
@@ -234,22 +120,13 @@ function Scene({
     slideZ,
     accumSpin,
     accumTilt,
-    isHolding,
-    heldName,
-    heldX,
-    heldY,
-    heldZ,
-    heldRotX,
   ]);
 
-  // One-finger drag → move held part if holding, else pan the table.
-  // Writes only shared values (no native calls) — the render worklet applies
-  // the actual transforms. This avoids crashing Filament from the gesture.
+  // Drag → move held part if holding, else pan the tabletop
   const dragStartX = useSharedValue(0);
   const dragStartZ = useSharedValue(0);
   const partStartX = useSharedValue(0);
   const partStartZ = useSharedValue(0);
-
   const panGesture = Gesture.Pan()
     .minPointers(1)
     .maxPointers(1)
@@ -263,27 +140,16 @@ function Scene({
     .onUpdate((e) => {
       'worklet';
       if (isHolding.value) {
-        // Move the held PART. Map screen → world so it tracks the finger:
-        // screen X → world X, screen Y → world Z. Larger factor + clamping
-        // so it follows the finger and doesn't fly off.
-        const f = 0.012;
-        let nx = partStartX.value + e.translationX * f;
-        let nz = partStartZ.value + e.translationY * f;
-        // clamp so the part can't shoot off-screen
-        if (nx > 3) nx = 3;
-        if (nx < -3) nx = -3;
-        if (nz > 3) nz = 3;
-        if (nz < -3) nz = -3;
-        heldX.value = nx;
-        heldZ.value = nz;
+        // Move the held PART (independent model)
+        heldX.value = partStartX.value + e.translationX * 0.006;
+        heldZ.value = partStartZ.value + e.translationY * 0.006;
       } else {
-        // Pan the table
+        // Pan the tabletop
         slideX.value = dragStartX.value + e.translationX * 0.01;
         slideZ.value = dragStartZ.value + e.translationY * 0.01;
       }
     });
 
-  // Pinch zoom
   const lastScale = useRef(1);
   const pinchGesture = Gesture.Pinch()
     .onBegin((e) => {
@@ -304,13 +170,70 @@ function Scene({
       <FilamentView style={styles.fill} renderCallback={renderCallback}>
         <Camera cameraManipulator={cameraManipulator} />
         <DefaultLight />
-        <ModelRenderer model={model} />
+        <ModelRenderer model={tabletop} />
+        {held != null && (
+          <HeldPart
+            uri={isBolt ? LACK_ASSEMBLY.boltModelUrl : LACK_ASSEMBLY.legModelUrl}
+            heldX={heldX}
+            heldY={heldY}
+            heldZ={heldZ}
+            heldSpin={heldSpin}
+          />
+        )}
       </FilamentView>
     </GestureDetector>
   );
 }
 
-export function FilamentTestScreen() {
+/**
+ * HeldPart — loads ONE standalone part model and positions it from shared
+ * values. Only mounts while a part is held (loading a model via useModel adds
+ * it to the scene, so mounting/unmounting is how we show/hide the part).
+ * Independent of the tabletop → joystick rotation does NOT affect it.
+ */
+function HeldPart({
+  uri,
+  heldX,
+  heldY,
+  heldZ,
+  heldSpin,
+}: {
+  uri: string;
+  heldX: ReturnType<typeof useSharedValue<number>>;
+  heldY: ReturnType<typeof useSharedValue<number>>;
+  heldZ: ReturnType<typeof useSharedValue<number>>;
+  heldSpin: ReturnType<typeof useSharedValue<number>>;
+}) {
+  const model = useModel({ uri });
+  const { transformManager } = useFilamentContext();
+
+  // Position the part each frame from the shared values (JS rAF loop — simple
+  // and safe; transformManager calls from JS are fine).
+  useEffect(() => {
+    let raf: number;
+    const tick = () => {
+      if (model.state === 'loaded') {
+        try {
+          const he = model.boundingBox.halfExtent;
+          const hmax = Math.max(he[0], he[1], he[2]) || 1;
+          const hs = 0.25 / hmax;
+          let pm = transformManager.createIdentityMatrix();
+          pm = pm.scaling([hs, hs, hs]);
+          pm = pm.rotate(heldSpin.value, [0, 1, 0]);
+          pm = pm.translate([heldX.value, 0.4 + heldY.value, heldZ.value]);
+          transformManager.setTransform(model.rootEntity, pm);
+        } catch {}
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [model, transformManager, heldX, heldY, heldZ, heldSpin]);
+
+  return <ModelRenderer model={model} />;
+}
+
+export function AssemblyV2() {
   const store = useAssemblyStore();
   const focusMode = useAssemblyStore((s) => s.focusMode);
   const held = useAssemblyStore((s) => s.held);
@@ -321,65 +244,50 @@ export function FilamentTestScreen() {
 
   const joyX = useSharedValue(0);
   const joyY = useSharedValue(0);
-  // Model transform shared values (lifted here so Reset can zero them)
   const slideX = useSharedValue(0);
   const slideZ = useSharedValue(0);
   const accumSpin = useSharedValue(0);
   const accumTilt = useSharedValue(0);
-  const cameraManipulatorRef = useRef<any>(null);
 
   useEffect(() => {
     store.init(def);
   }, []);
 
-  const handlePickupFromTray = useCallback((step: AssemblyStep) => {
-    // Set the held part in the store; the Scene watches `held` and shows it.
+  const handlePickup = useCallback((step: AssemblyStep) => {
+    // Mechanics come in Milestone 2; for now record the held part.
     store.pickUp(step.id, step.meshName);
   }, []);
 
   const handleReset = useCallback(() => {
     store.reset();
     store.init(def);
-    // Reset the model transform (rotation + pan) back to default.
-    // This is the visible reset — the table returns to upright & centered.
     slideX.value = 0;
     slideZ.value = 0;
     accumSpin.value = 0;
     accumTilt.value = 0;
-    // Note: the Filament camera manipulator has no direct "reset to home"
-    // method (only scroll/grab/getLookAt), so we reset the model rather than
-    // the camera. Zoom level stays where the user left it.
   }, []);
 
-  // Derived UI values (same as expo-gl AssemblyScreen)
   const step = store.currentStep();
   const phase =
-    step?.partNumber === '115980'
-      ? 'Phase 1 — Hanger bolts'
-      : 'Phase 2 — Legs';
+    step?.partNumber === '115980' ? 'Phase 1 — Hanger bolts' : 'Phase 2 — Legs';
   const stepNumber = store.currentStepIndex + 1;
   const totalSteps = def.steps.length;
   const isScrewing = snapState === 'screwing';
-  const progressPct = Math.round(rotationProgress * 100);
   const doneCount = Object.values(statuses).filter((v) => v === 'done').length;
   const overallPct = Math.round((doneCount / totalSteps) * 100);
 
   return (
     <View style={styles.root}>
-      {/* 3D layer */}
-      <View style={styles.fill}>
-        <FilamentScene>
-          <Scene
-            joyX={joyX}
-            joyY={joyY}
-            slideX={slideX}
-            slideZ={slideZ}
-            accumSpin={accumSpin}
-            accumTilt={accumTilt}
-            cameraManipulatorRef={cameraManipulatorRef}
-          />
-        </FilamentScene>
-      </View>
+      <FilamentScene>
+        <Scene
+          joyX={joyX}
+          joyY={joyY}
+          slideX={slideX}
+          slideZ={slideZ}
+          accumSpin={accumSpin}
+          accumTilt={accumTilt}
+        />
+      </FilamentScene>
 
       {/* Step panel */}
       <View style={styles.stepPanel} pointerEvents="none">
@@ -397,16 +305,13 @@ export function FilamentTestScreen() {
           </Text>
         )}
         {store.guidanceOn && held && !isScrewing && (
-          <Text style={styles.heldHint}>Drag to the green dot, then lift</Text>
+          <Text style={styles.heldHint}>Drag to the green dot, then twist</Text>
         )}
         {store.guidanceOn && isScrewing && (
-          <Text style={styles.screwHint}>
-            Rotate your finger in circles to screw in
-          </Text>
+          <Text style={styles.screwHint}>Twist in a circle to screw in</Text>
         )}
       </View>
 
-      {/* Overall progress bar */}
       {!focusMode && (
         <View style={styles.overallProgress} pointerEvents="none">
           <View style={styles.overallTrack}>
@@ -418,32 +323,26 @@ export function FilamentTestScreen() {
         </View>
       )}
 
-      {/* XP */}
       {!focusMode && <Text style={styles.xp}>{store.xp} XP</Text>}
 
-      {/* Reset */}
       <Pressable style={styles.resetBtn} onPress={handleReset}>
         <Text style={styles.resetText}>Reset</Text>
       </Pressable>
 
-      {/* Cancel/Back — only while holding a part; returns it to the tray */}
       {held && (
         <Pressable style={styles.cancelBtn} onPress={() => store.dropCancel()}>
           <Text style={styles.cancelText}>← Back to tray</Text>
         </Pressable>
       )}
 
-      {/* Toggles */}
       <View style={styles.toggleContainer}>
         <HintsToggle />
         <AutoRotateToggle />
         <FocusModeToggle />
       </View>
 
-      {/* Parts tray */}
-      <PartTray definition={def} onPickupPart={handlePickupFromTray} />
+      <PartTray definition={def} onPickupPart={handlePickup} />
 
-      {/* Joystick */}
       <JoystickShared outX={joyX} outY={joyY} />
     </View>
   );

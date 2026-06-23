@@ -12,7 +12,11 @@ export function HintsToggle() {
 
   return (
     <Pressable
-      onPress={toggleGuidance}
+      onPress={() => {
+        // eslint-disable-next-line no-console
+        console.log('HINTS toggle tapped → guidanceOn was', guidanceOn);
+        toggleGuidance();
+      }}
       style={[styles.button, guidanceOn && styles.buttonActive]}
     >
       <Text style={[styles.label, guidanceOn && styles.labelActive]}>

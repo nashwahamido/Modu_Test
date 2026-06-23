@@ -21,6 +21,11 @@ export interface AssemblyDefinition {
   steps: AssemblyStep[];
   xpPerStep: number;
   xpBonusOnComplete: number;
+  // Standalone part models loaded independently when a part is held, so the
+  // held part is NOT a child of the table root (won't rotate with the table).
+  boltModelUrl: string;
+  legModelUrl: string;
+  tabletopModelUrl: string;
 }
 
 export const LACK_ASSEMBLY: AssemblyDefinition = {
@@ -29,7 +34,15 @@ export const LACK_ASSEMBLY: AssemblyDefinition = {
   glbUrl:
     'https://bvnmmhsfndqaykjsoowy.supabase.co/storage/v1/object/public/models/LACK_30449908_55x55.glb',
   // Only the tabletop stays visible at start
-  baseMeshNames: ['table_top_00167769'],
+  baseMeshNames: ['table top_00167769'],
+  // Standalone part models (uploaded to Supabase) — loaded independently when
+  // a part is held, so the held part is NOT a child of the table root.
+  boltModelUrl:
+    'https://bvnmmhsfndqaykjsoowy.supabase.co/storage/v1/object/public/models/Bolt.glb',
+  legModelUrl:
+    'https://bvnmmhsfndqaykjsoowy.supabase.co/storage/v1/object/public/models/Leg.glb',
+  tabletopModelUrl:
+    'https://bvnmmhsfndqaykjsoowy.supabase.co/storage/v1/object/public/models/Tabletop.glb',
   xpPerStep: 10,
   xpBonusOnComplete: 40,
   steps: [
@@ -39,7 +52,7 @@ export const LACK_ASSEMBLY: AssemblyDefinition = {
       partNumber: '115980',
       label: 'Hanger bolt',
       meshName: '115980_01',
-      socketName: 'table_top_00167769',
+      socketName: 'table top_00167769',
       target: [0, 0, 0] as [number, number, number],
       targetRotation: [0, 0, 0] as [number, number, number],
       tool: 'screwdriver',
@@ -51,7 +64,7 @@ export const LACK_ASSEMBLY: AssemblyDefinition = {
       partNumber: '115980',
       label: 'Hanger bolt',
       meshName: '115980_02',
-      socketName: 'table_top_00167769',
+      socketName: 'table top_00167769',
       target: [0, 0, 0] as [number, number, number],
       targetRotation: [0, 0, 0] as [number, number, number],
       tool: 'screwdriver',
@@ -63,7 +76,7 @@ export const LACK_ASSEMBLY: AssemblyDefinition = {
       partNumber: '115980',
       label: 'Hanger bolt',
       meshName: '115980_03',
-      socketName: 'table_top_00167769',
+      socketName: 'table top_00167769',
       target: [0, 0, 0] as [number, number, number],
       targetRotation: [0, 0, 0] as [number, number, number],
       tool: 'screwdriver',
@@ -75,7 +88,7 @@ export const LACK_ASSEMBLY: AssemblyDefinition = {
       partNumber: '115980',
       label: 'Hanger bolt',
       meshName: '115980_04',
-      socketName: 'table_top_00167769',
+      socketName: 'table top_00167769',
       target: [0, 0, 0] as [number, number, number],
       targetRotation: [0, 0, 0] as [number, number, number],
       tool: 'screwdriver',
@@ -87,7 +100,7 @@ export const LACK_ASSEMBLY: AssemblyDefinition = {
       id: 'leg_0',
       partNumber: '00167768',
       label: 'Leg',
-      meshName: 'table_leg_00167768_001',
+      meshName: 'table leg_00167768_001',
       socketName: '115980_01',
       target: [0, 0, 0] as [number, number, number],
       targetRotation: [0, 0, 0] as [number, number, number],
@@ -99,7 +112,7 @@ export const LACK_ASSEMBLY: AssemblyDefinition = {
       id: 'leg_1',
       partNumber: '00167768',
       label: 'Leg',
-      meshName: 'table_leg_00167768_005',
+      meshName: 'table leg_00167768_005',
       socketName: '115980_02',
       target: [0, 0, 0] as [number, number, number],
       targetRotation: [0, 0, 0] as [number, number, number],
@@ -111,7 +124,7 @@ export const LACK_ASSEMBLY: AssemblyDefinition = {
       id: 'leg_2',
       partNumber: '00167768',
       label: 'Leg',
-      meshName: 'table_leg_00167768_006',
+      meshName: 'table leg_00167768_006',
       socketName: '115980_03',
       target: [0, 0, 0] as [number, number, number],
       targetRotation: [0, 0, 0] as [number, number, number],
@@ -123,7 +136,7 @@ export const LACK_ASSEMBLY: AssemblyDefinition = {
       id: 'leg_3',
       partNumber: '00167768',
       label: 'Leg',
-      meshName: 'table_leg_00167768_007',
+      meshName: 'table leg_00167768_007',
       socketName: '115980_04',
       target: [0, 0, 0] as [number, number, number],
       targetRotation: [0, 0, 0] as [number, number, number],
