@@ -33,7 +33,6 @@ import { GreenFlash } from "@/game/ui/GreenFlash";
 import { FitChip } from "@/game/ui/FitChip";
 import { PartsTray } from "@/game/ui/PartsTray";
 import { BaseStashControl } from "@/game/ui/BaseStashControl";
-import { ResetButton } from "@/game/ui/ResetButton";
 import { DevAutoStep } from "@/game/ui/DevAutoStep";
 import { SettingsPanel } from "@/game/ui/SettingsPanel";
 
@@ -187,7 +186,6 @@ function GameScreen() {
         </View>
       )}
       <FitChip />
-      <ResetButton />
       <PartsTray
         items={sceneState.trayItems}
         gestureFor={gestureFor}
@@ -222,13 +220,16 @@ function GameScreen() {
           <Text style={styles.putBackText}>↩ Put back</Text>
         </Pressable>
       ) : null}
-      <Pressable
-        style={styles.settingsButton}
-        onPress={() => setShowSettings(true)}
-        hitSlop={8}
-      >
-        <Text style={styles.settingsIcon}>⚙</Text>
-      </Pressable>
+      {settings.focusMode ? null : (
+        <Pressable
+          style={styles.settingsButton}
+          onPress={() => setShowSettings(true)}
+          hitSlop={8}
+        >
+          <Text style={styles.settingsIcon}>⚙</Text>
+        </Pressable>
+      )}
+      {settings.focusMode ? null : (
       <View style={styles.undoRedoRow}>
         <Pressable
           style={[styles.ctrlButton, completedCount === 0 && styles.ctrlDisabled]}
@@ -247,6 +248,7 @@ function GameScreen() {
           <Text style={styles.ctrlText}>↷</Text>
         </Pressable>
       </View>
+      )}
       <View style={styles.togglesRow}>
         <ToggleChip
           label="Focus"
@@ -258,11 +260,13 @@ function GameScreen() {
           on={settings.showHints}
           onToggle={() => setSettings({ showHints: !settings.showHints })}
         />
-        <ToggleChip
-          label="Auto-View"
-          on={settings.autoView}
-          onToggle={() => setSettings({ autoView: !settings.autoView })}
-        />
+        {settings.focusMode ? null : (
+          <ToggleChip
+            label="Auto-View"
+            on={settings.autoView}
+            onToggle={() => setSettings({ autoView: !settings.autoView })}
+          />
+        )}
       </View>
       {ringOverlay}
       <DevAutoStep heldDriver={heldDriver} sinkDriver={sinkDriver} />
@@ -317,8 +321,8 @@ const styles = StyleSheet.create({
   joystickZone: { position: "absolute", left: 28, bottom: 28 },
   recenterButton: {
     position: "absolute",
-    left: 180,
-    bottom: 70,
+    left: 14,
+    top: 102,
     backgroundColor: "rgba(255,255,255,0.85)",
     borderRadius: 14,
     paddingHorizontal: 12,
