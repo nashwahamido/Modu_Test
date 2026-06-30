@@ -10,14 +10,17 @@ const ORBIT_RATE = 220; // viewport px/s at full stick deflection
 const ZOOM_RATE = 32; // scroll delta per unit pinch-scale change (user feel-tested)
 const HOME_EYE: [number, number, number] = [1.0, 0.85, 1.0];
 
-// Auto-View framing: orbit the camera around the assembly CENTRE so the next
-// slot rotates to face the screen, while keeping the whole model framed and
-// roughly centred (target stays the centre, so placing a part never flings the
-// model off-canvas). Top-facing slots (bolts) are viewed from slightly above;
-// under-facing slots (legs) from slightly below. Tune RADIUS for overall zoom.
-const AUTO_RADIUS = 1.5; // camera distance from centre (keeps the model in frame)
-const AUTO_ELEV = 0.52; // elevation angle, radians (~30°)
+// Auto-View framing: orbit the camera so the next slot rotates toward the
+// screen AND comes in close, while the model stays largely framed. The look-at
+// is blended part-way from the assembly centre toward the slot (so the hole
+// sits near screen-centre and the model trails behind it), and the camera sits
+// AUTO_RADIUS from that look point. Top-facing slots (bolts) are viewed from
+// slightly above; under-facing slots (legs) from slightly below.
+const AUTO_RADIUS = 1.15; // camera distance from the look point — lower = closer
+const AUTO_ELEV = 0.5; // elevation angle, radians (~29°)
+const AUTO_TARGET_BLEND = 0.5; // look-at: 0 = model centre, 1 = the slot itself
 function framingEye(
+  anchor: [number, number, number],
   center: [number, number, number],
   slot: [number, number, number],
 ): [number, number, number] {
@@ -32,12 +35,11 @@ function framingEye(
   }
   dx /= len;
   dz /= len;
-  // Below the assembly centre → it's an under-facing slot (e.g. a leg); view
-  // from below so the bottom of the corner is what the camera sees.
+  // Below the assembly centre → under-facing slot (e.g. a leg); view from below.
   const below = slot[1] < center[1] - 0.02;
   const horiz = AUTO_RADIUS * Math.cos(AUTO_ELEV);
   const vert = AUTO_RADIUS * Math.sin(AUTO_ELEV) * (below ? -1 : 1);
-  return [center[0] + dx * horiz, center[1] + vert, center[2] + dz * horiz];
+  return [anchor[0] + dx * horiz, anchor[1] + vert, anchor[2] + dz * horiz];
 }
 
 /**
@@ -160,12 +162,21 @@ export function useOrbitCamera() {
     let nextTarget: [number, number, number];
     let nextEye: [number, number, number];
     if (autoFrame) {
-      // Auto-view: keep the assembly CENTRE as the look-at (model stays put and
-      // framed) and orbit the eye so the next slot rotates toward the camera.
+      // Auto-view: look at a point blended toward the slot (so the hole sits
+      // near screen-centre and zooms in) and orbit the eye so it faces camera.
       const center = pivot(stage, activeCluster, null, null, null);
       const slot = pivot(stage, activeCluster, null, autoFrame, null);
-      nextTarget = center;
-      nextEye = framingEye(center, slot);
+      const look: [number, number, number] = [
+        center[0] + (slot[0] - center[0]) * AUTO_TARGET_BLEND,
+        center[1] + (slot[1] - center[1]) * AUTO_TARGET_BLEND,
+        center[2] + (slot[2] - center[2]) * AUTO_TARGET_BLEND,
+      ];
+      nextTarget = look;
+      nextEye = framingEye(look, center, slot);
+      // Remember this framed eye. Picking the part up drops autoFrame (you're
+      // now holding), and the else-branch restores eyeRef — without this it
+      // would snap back to the pre-auto-view eye (e.g. flip bottom→top).
+      eyeRef.current = nextEye;
     } else {
       // Otherwise keep the user's current eye (carry their orbit) and only
       // re-aim at the new target.

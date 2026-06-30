@@ -28,6 +28,10 @@ import { instructionText } from "@/game/core/presentation/instructions";
 // This screen assembles the LACK table.
 const ACTIVE_FURNITURE = LACK;
 
+// Background images (static requires — Metro can't bundle a dynamic path).
+const BG_LIGHT = require("../assets/images/studio-bg.png");
+const BG_DARK = require("../assets/images/dark.png");
+
 // ui related
 import { GreenFlash } from "@/game/ui/GreenFlash";
 import { FitChip } from "@/game/ui/FitChip";
@@ -151,9 +155,9 @@ function GameScreen() {
 
   return (
     <ImageBackground
-      source={require("../assets/images/studio-bg.png")}
+      source={settings.darkMode ? BG_DARK : BG_LIGHT}
       resizeMode="cover"
-      style={styles.root}
+      style={[styles.root, settings.darkMode && styles.rootDark]}
     >
       <GestureDetector gesture={sceneGesture}>
         <View style={styles.sceneWrap}>
@@ -208,9 +212,11 @@ function GameScreen() {
       <View style={styles.joystickZone}>
         <Joystick onStart={onStickStart} onMove={onStickMove} onEnd={onStickEnd} />
       </View>
-      <Pressable style={styles.recenterButton} onPress={resetCamera} hitSlop={8}>
-        <Text style={styles.recenterText}>⟲ Recenter</Text>
-      </Pressable>
+      {settings.focusMode ? null : (
+        <Pressable style={styles.recenterButton} onPress={resetCamera} hitSlop={8}>
+          <Text style={styles.recenterText}>⟲ Recenter</Text>
+        </Pressable>
+      )}
       {heldActionId ? (
         <Pressable
           style={styles.putBackButton}
@@ -255,11 +261,13 @@ function GameScreen() {
           on={settings.focusMode}
           onToggle={() => setSettings({ focusMode: !settings.focusMode })}
         />
-        <ToggleChip
-          label="Hints"
-          on={settings.showHints}
-          onToggle={() => setSettings({ showHints: !settings.showHints })}
-        />
+        {settings.focusMode ? null : (
+          <ToggleChip
+            label="Hints"
+            on={settings.showHints}
+            onToggle={() => setSettings({ showHints: !settings.showHints })}
+          />
+        )}
         {settings.focusMode ? null : (
           <ToggleChip
             label="Auto-View"
@@ -288,6 +296,7 @@ export default function GameScreenRoute() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#a8cfe0" },
+  rootDark: { backgroundColor: "#4a6385" },
   sceneWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   objectiveBar: {
     position: "absolute",

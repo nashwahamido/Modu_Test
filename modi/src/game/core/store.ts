@@ -16,6 +16,7 @@ export interface AccessibilitySettings {
   focusMode: boolean; // show only the current part + action
   showHints: boolean; // instructional prompts on/off
   autoView: boolean; // auto-orient to the next highlighted socket
+  darkMode: boolean; // dark background theme
   // ADDITIVE toggles…
   showPictogram: boolean;
   showSymbols: boolean;
@@ -29,6 +30,7 @@ const DEFAULT_SETTINGS: AccessibilitySettings = {
   focusMode: false,
   showHints: true,
   autoView: false,
+  darkMode: false,
   showPictogram: false,
   showSymbols: false,
   audioCues: false,
