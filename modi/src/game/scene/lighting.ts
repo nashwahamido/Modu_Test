@@ -1,36 +1,39 @@
-// Lighting rig for the assembly scene.
-//
-// The parts already carry full PBR materials (IKEA albedo + normal maps), so a
-// believable look comes from the light rig + environment, not the meshes. This
-// is a 3-point rig over the default image-based light:
-//   • KEY  — warm, casts shadows, sculpts the main form.
-//   • FILL — cool, opposite side, no shadows, opens up the dark side.
-//   • RIM  — from behind, separates the part from the background.
-// All values are physical (lux / Kelvin); treat them as starting points to taste.
+// Lighting rig for the assembly scene — tuned toward a stylised-PBR look:
+// warm key, strong cool rim for bright silhouette edges, gentle fill, and a
+// low image-based ambient so the form reads with contrast and drama (vs. the
+// old flat, evenly-lit setup). All values physical (lux / Kelvin); tune freely.
 
-// Fallback colour shown behind the (transparent) Filament view before the
-// background image paints. Kept roughly matching the studio backdrop.
+// Fallback colour behind the (transparent) Filament view before the bg paints.
 export const SCENE_BACKGROUND = '#a8cfe0';
 
-/** Ambient/reflection level from the image-based light. */
-export const IBL_INTENSITY = 38_000;
+/**
+ * Ambient/reflection from the image-based light. Kept LOW on purpose — high IBL
+ * flattens everything; lowering it lets the key/rim sculpt the parts. Raise
+ * toward ~30000 if the shadow side goes too dark.
+ */
+export const IBL_INTENSITY = 20_000;
 
+/** KEY — warm, from upper-front-left, casts shadows. The main sculpting light. */
 export const KEY_LIGHT = {
-  colorKelvin: 5_200,
-  intensity: 78_000,
+  colorKelvin: 4_800,
+  intensity: 90_000,
   direction: [-0.5, -1, -0.6] as [number, number, number],
 };
 
-/** Cool fill from the opposite side; no shadows — softens the key's shadow side. */
+/** FILL — cool, opposite side, no shadows; just opens the dark side a little. */
 export const FILL_LIGHT = {
-  colorKelvin: 7_200,
-  intensity: 22_000,
+  colorKelvin: 7_600,
+  intensity: 15_000,
   direction: [0.6, -0.45, 0.5] as [number, number, number],
 };
 
-/** Back/rim light to carve a bright edge and lift the part off the backdrop. */
+/**
+ * RIM — strong cool back-light that carves the bright edge you see in the
+ * reference robots and lifts the part off the backdrop. This is what gives the
+ * "edge glow" — raise intensity for a hotter rim, lower for subtler.
+ */
 export const RIM_LIGHT = {
-  colorKelvin: 6_500,
-  intensity: 34_000,
-  direction: [0.35, -0.3, 0.7] as [number, number, number],
+  colorKelvin: 7_800,
+  intensity: 64_000,
+  direction: [0.3, -0.25, 0.85] as [number, number, number],
 };

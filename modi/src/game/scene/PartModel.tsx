@@ -64,6 +64,26 @@ function useInstanceEntity(model: FilamentModel, meshName: string, instanceIndex
 }
 
 /**
+ * Adds this part's inverted-hull outline to the scene alongside the part.
+ *
+ * The GLB carries a `<meshName>__outline` child node under each part: a copy of
+ * the mesh, slightly inflated with reversed winding and a flat dark unlit
+ * material. As a CHILD it inherits the part's transform automatically (incl.
+ * the OffsetDriver animation on held parts), so we only need to add/remove its
+ * entity from the scene — never position it. Resolved on instance 0 only, so
+ * ghosts (instance 1) get no outline.
+ */
+function useOutlineHull(model: FilamentModel, meshName: string) {
+  const { scene } = useFilamentContext();
+  const hull = useInstanceEntity(model, `${meshName}__outline`, 0);
+  useEffect(() => {
+    if (!hull) return;
+    scene.addEntity(hull);
+    return () => scene.removeEntity(hull);
+  }, [hull, scene]);
+}
+
+/**
  * Glowing ghost of a part at its baked (or loose) pose, rendered from the
  * second model instance so it can coexist with the primary copy.
  */
@@ -211,6 +231,7 @@ function DrivenEntity({
 }) {
   const { transformManager, scene } = useFilamentContext();
   const entity = useInstanceEntity(model, def.meshName, 0);
+  useOutlineHull(model, def.meshName);
 
   useEffect(() => {
     if (!entity) return;
@@ -254,6 +275,7 @@ function StaticEntity({
   const { transformManager, scene } = useFilamentContext();
   const entity = useInstanceEntity(model, def.meshName, 0);
   const worldShift = useGameStore((s) => s.worldShift);
+  useOutlineHull(model, def.meshName);
 
   useEffect(() => {
     if (!entity) return;

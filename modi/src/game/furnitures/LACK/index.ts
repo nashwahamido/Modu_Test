@@ -10,11 +10,11 @@ import { LABELS } from "./parts.authored";
 import { ALL_PART_IDS, PARTS } from "./parts.gen";
 
 // assets — the combined LACK GLB (whole_* named entities at baked poses).
-const model = require("../../../assets/models/furniture-models/LACK/LACK.glb");
+const model = require("../../../assets/models/furniture-models/LACK/LACK_v2.glb");
 // Placeholder: meta.thumbnail is only used by a furniture picker (GameScreen
 // never renders it), so it points at the model file to avoid a separate PNG
 // asset. Swap to a real preview PNG later.
-const thumbnail = require("../../../assets/models/furniture-models/LACK/LACK.glb");
+const thumbnail = require("../../../assets/models/furniture-models/LACK/LACK_v2.glb");
 
 // The table top is a flat surface you just set down — no twist-to-lock. Every
 // other part (the legs) keeps the screw-in-by-hand twist.
