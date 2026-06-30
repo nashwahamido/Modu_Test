@@ -4,10 +4,13 @@ import {
   Text,
   StyleSheet,
   Pressable,
-  ScrollView,
   Image,
 } from 'react-native';
-import { GestureDetector, Gesture } from 'react-native-gesture-handler';
+import {
+  GestureDetector,
+  Gesture,
+  ScrollView,
+} from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import type { useSharedValue } from 'react-native-worklets-core';
 import { AssemblyDefinition, AssemblyStep } from '../data/lackAssembly';

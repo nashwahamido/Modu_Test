@@ -23,9 +23,11 @@ export interface AssemblyDefinition {
   xpBonusOnComplete: number;
   // Standalone part models loaded independently when a part is held, so the
   // held part is NOT a child of the table root (won't rotate with the table).
-  boltModelUrl: string;
-  legModelUrl: string;
-  tabletopModelUrl: string;
+  // Bundled assets: require(...) resolves to a numeric asset id that
+  // react-native-filament's useModel accepts directly as a source.
+  boltModel: number;
+  legModel: number;
+  tabletopModel: number;
 }
 
 export const LACK_ASSEMBLY: AssemblyDefinition = {
@@ -35,14 +37,12 @@ export const LACK_ASSEMBLY: AssemblyDefinition = {
     'https://bvnmmhsfndqaykjsoowy.supabase.co/storage/v1/object/public/models/LACK_30449908_55x55.glb',
   // Only the tabletop stays visible at start
   baseMeshNames: ['table top_00167769'],
-  // Standalone part models (uploaded to Supabase) — loaded independently when
-  // a part is held, so the held part is NOT a child of the table root.
-  boltModelUrl:
-    'https://bvnmmhsfndqaykjsoowy.supabase.co/storage/v1/object/public/models/Bolt.glb',
-  legModelUrl:
-    'https://bvnmmhsfndqaykjsoowy.supabase.co/storage/v1/object/public/models/Leg.glb',
-  tabletopModelUrl:
-    'https://bvnmmhsfndqaykjsoowy.supabase.co/storage/v1/object/public/models/Tabletop.glb',
+  // Standalone part models, bundled locally in assets/models/ — loaded
+  // independently when a part is held, so the held part is NOT a child of the
+  // table root. (Path is relative to this file: src/data → ../../assets.)
+  boltModel: require('../../assets/models/Bolt.glb'),
+  legModel: require('../../assets/models/Leg.glb'),
+  tabletopModel: require('../../assets/models/Tabletop.glb'),
   xpPerStep: 10,
   xpBonusOnComplete: 40,
   steps: [

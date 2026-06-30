@@ -1,5 +1,12 @@
-import React, { useRef, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, Pressable } from 'react-native';
+import React, { useRef, useCallback, useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Dimensions,
+  Pressable,
+  Animated,
+} from 'react-native';
 import {
   FilamentScene,
   FilamentView,
@@ -12,6 +19,7 @@ import {
   RenderCallback,
 } from 'react-native-filament';
 import { useSharedValue } from 'react-native-worklets-core';
+import * as Haptics from 'expo-haptics';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { LACK_ASSEMBLY, AssemblyStep } from '../data/lackAssembly';
 import { useAssemblyStore } from '../store/assemblyStore';
@@ -68,12 +76,20 @@ function Scene({
   // the HeldPart component, which only mounts when a part is held (loading a
   // model via useModel immediately adds it to the scene, so we must not load
   // the parts until they're actually needed).
-  const tabletop = useModel({ uri: LACK_ASSEMBLY.tabletopModelUrl });
+  const tabletop = useModel(LACK_ASSEMBLY.tabletopModel);
   const { transformManager, scene } = useFilamentContext();
 
   // Which part is held (from the store).
   const held = useAssemblyStore((s) => s.held);
   const isBolt = held?.meshName?.startsWith('115980');
+
+  // The loaded held-part model, lifted up from HeldPartLoader so the render
+  // worklet (below) can transform it on the render thread — JS-thread
+  // setTransform does not take effect, which is why the old rAF approach
+  // loaded the part but never showed it.
+  const [heldModel, setHeldModel] = useState<ReturnType<typeof useModel> | null>(
+    null
+  );
 
   // Held part transform values now come in as props (created in AssemblyV2),
   // so the PartTray drag gesture and this Scene share the same values.
@@ -111,15 +127,39 @@ function Scene({
     if (accumTilt.value < -lim) accumTilt.value = -lim;
 
     const he = tabletop.boundingBox.halfExtent;
+    const tc = tabletop.boundingBox.center;
     const maxHalf = Math.max(he[0], he[1], he[2]) || 1;
     const s = 0.5 / maxHalf;
 
     let m = transformManager.createIdentityMatrix();
+    // Recenter on the tabletop's own bbox center FIRST (innermost factor) so it
+    // rotates around its middle, not around the GLB origin (which sits off to
+    // one side because the model was exported in place).
+    m = m.translate([-tc[0], -tc[1], -tc[2]]);
     m = m.scaling([s, s, s]);
     m = m.rotate(accumTilt.value, [1, 0, 0]);
     m = m.rotate(accumSpin.value, [0, 1, 0]);
     m = m.translate([slideX.value, 0, slideZ.value]);
     transformManager.setTransform(root, m);
+
+    // Held part — transformed in the SAME render worklet as the tabletop, so
+    // setTransform runs on the render thread (where it actually takes effect).
+    // Its own matrix, so the tabletop's rotation/pan does not affect it.
+    if (heldModel != null && heldModel.state === 'loaded') {
+      const hC = heldModel.boundingBox.center;
+      // Scale the held part by the SAME factor as the tabletop (s), so its
+      // real-world size is preserved relative to the table — a ~7cm bolt next
+      // to a ~55cm top — instead of normalising it to its own size (huge).
+      const hs = s;
+      let pm = transformManager.createIdentityMatrix();
+      // Recenter on the part's own bbox center first (innermost factor) so an
+      // in-place export isn't flung off-screen by the scale.
+      pm = pm.translate([-hC[0], -hC[1], -hC[2]]);
+      pm = pm.scaling([hs, hs, hs]);
+      pm = pm.rotate(heldSpin.value, [0, 1, 0]);
+      pm = pm.translate([heldX.value, 0.12 + heldY.value, heldZ.value]);
+      transformManager.setTransform(heldModel.rootEntity, pm);
+    }
   }, [
     tabletop,
     transformManager,
@@ -129,6 +169,11 @@ function Scene({
     slideZ,
     accumSpin,
     accumTilt,
+    heldModel,
+    heldX,
+    heldY,
+    heldZ,
+    heldSpin,
   ]);
 
   // Drag → move held part if holding, else pan the tabletop
@@ -174,70 +219,298 @@ function Scene({
 
   const combinedGesture = Gesture.Simultaneous(panGesture, pinchGesture);
 
+  const tableScale =
+    tabletop.state === 'loaded'
+      ? 0.5 / (Math.max(...tabletop.boundingBox.halfExtent) || 1)
+      : 1;
+
   return (
-    <GestureDetector gesture={combinedGesture}>
-      <FilamentView style={styles.fill} renderCallback={renderCallback}>
-        <Camera cameraManipulator={cameraManipulator} />
-        <DefaultLight />
-        <ModelRenderer model={tabletop} />
-        {held != null && (
-          <HeldPart
-            uri={isBolt ? LACK_ASSEMBLY.boltModelUrl : LACK_ASSEMBLY.legModelUrl}
-            heldX={heldX}
-            heldY={heldY}
-            heldZ={heldZ}
-            heldSpin={heldSpin}
-          />
-        )}
-      </FilamentView>
-    </GestureDetector>
+    <>
+      <GestureDetector gesture={combinedGesture}>
+        <FilamentView style={styles.fill} renderCallback={renderCallback}>
+          <Camera cameraManipulator={cameraManipulator} />
+          <DefaultLight />
+          <ModelRenderer model={tabletop} />
+          {held != null && (
+            <HeldPartLoader
+              source={isBolt ? LACK_ASSEMBLY.boltModel : LACK_ASSEMBLY.legModel}
+              onModel={setHeldModel}
+            />
+          )}
+        </FilamentView>
+      </GestureDetector>
+      {tabletop.state === 'loaded' && (
+        <TargetDots
+          bbox={tabletop.boundingBox}
+          scaleS={tableScale}
+          accumSpin={accumSpin}
+          accumTilt={accumTilt}
+          slideX={slideX}
+          slideZ={slideZ}
+          heldX={heldX}
+          heldZ={heldZ}
+          held={held}
+        />
+      )}
+    </>
   );
 }
 
 /**
- * HeldPart — loads ONE standalone part model and positions it from shared
- * values. Only mounts while a part is held (loading a model via useModel adds
- * it to the scene, so mounting/unmounting is how we show/hide the part).
- * Independent of the tabletop → joystick rotation does NOT affect it.
+ * TargetDots — pulsing green circles drawn ON the tabletop's bolt holes.
+ *
+ * The holes live in the table's 3D space, so each frame we take the hole's
+ * local offset, run it through the SAME transform the render worklet applies
+ * (scale → tilt → spin → slide), then project it to screen coordinates with
+ * RNF's view.projectWorldToScreen and place a 2D dot there. The dots therefore
+ * track the table as it rotates / pans / zooms.
+ *
+ * Tuning knobs (top of the component): HOLE_INSET (how far in from the corners),
+ * SURFACE_SIGN (which face the holes sit on), and PROJECT_SCALE (physical →
+ * logical pixel correction for projectWorldToScreen).
  */
-function HeldPart({
-  uri,
-  heldX,
-  heldY,
-  heldZ,
-  heldSpin,
-}: {
-  uri: string;
-  heldX: ReturnType<typeof useSharedValue<number>>;
-  heldY: ReturnType<typeof useSharedValue<number>>;
-  heldZ: ReturnType<typeof useSharedValue<number>>;
-  heldSpin: ReturnType<typeof useSharedValue<number>>;
-}) {
-  const model = useModel({ uri });
-  const { transformManager } = useFilamentContext();
+const RING = 30; // small ring sized to the hole, not a big glow
+const HOLE_INSET = 0.78; // fraction of the half-extent (1 = exact corner)
+const SURFACE_SIGN = 1; // +1 top face, -1 bottom face
+const PROJECT_SCALE = 1; // projectWorldToScreen returns logical px; tune if off
+const ATTRACT_RADIUS = 0.2; // world units: the hole starts easing the bolt in
+const SNAP_RADIUS = 0.085; // world units: bolt locks into the hole + attaches
 
-  // Position the part each frame from the shared values (JS rAF loop — simple
-  // and safe; transformManager calls from JS are fine).
+/**
+ * TargetDots — ONE pulsing green spotlight on the hole for the current step,
+ * plus the magnetic snap that makes the bolt easy to place.
+ *
+ * Each frame we take the active hole's local offset, run it through the SAME
+ * transform the render worklet applies (scale → tilt → spin → slide) to get its
+ * world position, then:
+ *   1. compare it to the held bolt's world position (heldX/heldZ); within
+ *      ATTRACT_RADIUS we ease the bolt toward the hole, within SNAP_RADIUS we
+ *      lock it on and attach (advance the step);
+ *   2. project the world position to screen and draw the pulsing spotlight.
+ */
+function TargetDots({
+  bbox,
+  scaleS,
+  accumSpin,
+  accumTilt,
+  slideX,
+  slideZ,
+  heldX,
+  heldZ,
+  held,
+}: {
+  bbox: { halfExtent: number[]; center: number[] };
+  scaleS: number;
+  accumSpin: ReturnType<typeof useSharedValue<number>>;
+  accumTilt: ReturnType<typeof useSharedValue<number>>;
+  slideX: ReturnType<typeof useSharedValue<number>>;
+  slideZ: ReturnType<typeof useSharedValue<number>>;
+  heldX: ReturnType<typeof useSharedValue<number>>;
+  heldZ: ReturnType<typeof useSharedValue<number>>;
+  held: { stepId: string } | null;
+}) {
+  const { view } = useFilamentContext();
+  const currentStepIndex = useAssemblyStore((s) => s.currentStepIndex);
+  const completed = useAssemblyStore((s) => s.completed);
+  const dropSuccess = useAssemblyStore((s) => s.dropSuccess);
+  // Position is driven imperatively via Animated.setValue (NO per-frame
+  // setState — that was re-rendering 60×/sec and making the drag stutter).
+  const posX = useRef(new Animated.Value(0)).current;
+  const posY = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
+  const [visible, setVisible] = useState(false);
+  const visibleRef = useRef(false);
+  const attachedRef = useRef(false);
+  const loggedOnce = useRef(false);
+
+  // Reset the one-shot attach guard each time a new part is picked up.
+  useEffect(() => {
+    attachedRef.current = false;
+  }, [held?.stepId]);
+
+  // Continuous pulse (native driver — independent of the JS position updates).
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 800, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+
   useEffect(() => {
     let raf: number;
     const tick = () => {
-      if (model.state === 'loaded') {
-        try {
-          const he = model.boundingBox.halfExtent;
-          const hmax = Math.max(he[0], he[1], he[2]) || 1;
-          const hs = 0.25 / hmax;
-          let pm = transformManager.createIdentityMatrix();
-          pm = pm.scaling([hs, hs, hs]);
-          pm = pm.rotate(heldSpin.value, [0, 1, 0]);
-          pm = pm.translate([heldX.value, 0.4 + heldY.value, heldZ.value]);
-          transformManager.setTransform(model.rootEntity, pm);
-        } catch {}
+      const he = bbox.halfExtent;
+      const hx = he[0] * HOLE_INSET;
+      const hz = he[2] * HOLE_INSET;
+      const surfaceY = he[1] * SURFACE_SIGN;
+      // The active hole only (corner = step index, wrapping 0–3).
+      const corners: [number, number, number][] = [
+        [hx, surfaceY, hz],
+        [hx, surfaceY, -hz],
+        [-hx, surfaceY, hz],
+        [-hx, surfaceY, -hz],
+      ];
+      const off = corners[currentStepIndex % 4];
+
+      // World position = scale → rotateX(tilt) → rotateY(spin) → translate(pan),
+      // matching the render worklet's tabletop transform.
+      const ct = Math.cos(accumTilt.value);
+      const st = Math.sin(accumTilt.value);
+      const cs = Math.cos(accumSpin.value);
+      const ss = Math.sin(accumSpin.value);
+      let x = off[0] * scaleS;
+      let y = off[1] * scaleS;
+      let z = off[2] * scaleS;
+      const y1 = y * ct - z * st;
+      const z1 = y * st + z * ct;
+      y = y1;
+      z = z1;
+      const x2 = x * cs + z * ss;
+      const z2 = -x * ss + z * cs;
+      x = x2;
+      z = z2;
+      x += slideX.value;
+      z += slideZ.value;
+
+      // Magnetic snap: ease the held bolt toward the hole once it's close, then
+      // lock + attach. Tighter radii so it takes real aim.
+      if (held && !attachedRef.current) {
+        const dx = x - heldX.value;
+        const dz = z - heldZ.value;
+        const dist = Math.hypot(dx, dz);
+        if (dist < ATTRACT_RADIUS) {
+          heldX.value += dx * 0.3;
+          heldZ.value += dz * 0.3;
+        }
+        if (dist < SNAP_RADIUS) {
+          heldX.value = x;
+          heldZ.value = z;
+          attachedRef.current = true;
+          try {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          } catch {}
+          dropSuccess();
+        }
       }
+
+      try {
+        const screen = view.projectWorldToScreen([x, y, z]);
+        posX.setValue(screen[0] * PROJECT_SCALE - RING / 2);
+        posY.setValue(screen[1] * PROJECT_SCALE - RING / 2);
+        if (!visibleRef.current) {
+          visibleRef.current = true;
+          setVisible(true);
+        }
+        if (!loggedOnce.current) {
+          loggedOnce.current = true;
+          // eslint-disable-next-line no-console
+          console.log(
+            'V2 TargetDots — bbox.halfExtent:',
+            JSON.stringify(he),
+            '| active hole screen:',
+            JSON.stringify([screen[0], screen[1]])
+          );
+        }
+      } catch {}
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [model, transformManager, heldX, heldY, heldZ, heldSpin]);
+  }, [
+    bbox,
+    view,
+    scaleS,
+    accumSpin,
+    accumTilt,
+    slideX,
+    slideZ,
+    heldX,
+    heldZ,
+    held,
+    currentStepIndex,
+    dropSuccess,
+    posX,
+    posY,
+  ]);
+
+  if (completed || !visible) return null;
+
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      {/* JS-driven position wrapper; inner ring does the native-driver pulse. */}
+      <Animated.View
+        style={{
+          position: 'absolute',
+          transform: [{ translateX: posX }, { translateY: posY }],
+        }}
+      >
+        <Animated.View
+          style={[
+            styles.spotRing,
+            {
+              opacity: pulse.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0.6, 1],
+              }),
+              transform: [
+                {
+                  scale: pulse.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.9, 1.25],
+                  }),
+                },
+              ],
+            },
+          ]}
+        />
+      </Animated.View>
+    </View>
+  );
+}
+
+/**
+ * HeldPartLoader — loads ONE standalone part model and lifts the loaded model
+ * up to <Scene> (via onModel) so the render worklet can transform it on the
+ * render thread, where setTransform actually takes effect. Only mounts while a
+ * part is held; rendering <ModelRenderer> is what adds it to the scene.
+ */
+function HeldPartLoader({
+  source,
+  onModel,
+}: {
+  source: number;
+  onModel: (m: ReturnType<typeof useModel> | null) => void;
+}) {
+  const model = useModel(source);
+
+  // Lift the loaded model up to <Scene> — but only when the LOAD STATE
+  // changes, not on every render. useModel returns a new wrapper object each
+  // render (its rootEntity/boundingBox are memoised on the asset, so they stay
+  // stable); depending on the whole object here caused an infinite setState
+  // loop. onModel (setHeldModel) is identity-stable, so it's safe to omit.
+  useEffect(() => {
+    onModel(model.state === 'loaded' ? model : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model.state]);
+
+  // Clear it on unmount (part dropped / cancelled).
+  useEffect(() => () => onModel(null), [onModel]);
+
+  useEffect(() => {
+    if (model.state === 'loaded') {
+      // eslint-disable-next-line no-console
+      console.log(
+        'V2 HeldPart — LOADED. halfExtent:',
+        JSON.stringify(model.boundingBox.halfExtent),
+        '| center:',
+        JSON.stringify(model.boundingBox.center)
+      );
+    }
+  }, [model.state]);
 
   return <ModelRenderer model={model} />;
 }
@@ -329,7 +602,7 @@ export function AssemblyV2() {
           </Text>
         )}
         {store.guidanceOn && held && !isScrewing && (
-          <Text style={styles.heldHint}>Drag to the green dot, then twist</Text>
+          <Text style={styles.heldHint}>Drag the bolt onto the glowing hole</Text>
         )}
         {store.guidanceOn && isScrewing && (
           <Text style={styles.screwHint}>Twist in a circle to screw in</Text>
@@ -379,6 +652,14 @@ export function AssemblyV2() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#6f8a68' },
   fill: { ...StyleSheet.absoluteFill },
+  spotRing: {
+    width: RING,
+    height: RING,
+    borderRadius: RING / 2,
+    borderWidth: 4,
+    borderColor: '#3ddc84',
+    backgroundColor: 'rgba(61,220,132,0.18)',
+  },
   stepPanel: {
     position: 'absolute',
     top: 12,
