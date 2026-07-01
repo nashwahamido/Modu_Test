@@ -22,6 +22,7 @@ import { RotateControl } from "@/game/input/RotateControl";
 
 // assembly data
 import { useGameStore } from "@/game/core/store";
+import { FurnitureStyle } from "@/game/core/type";
 import { LACK } from "@/game/furnitures/LACK";
 import { instructionText } from "@/game/core/presentation/instructions";
 
@@ -29,8 +30,25 @@ import { instructionText } from "@/game/core/presentation/instructions";
 const ACTIVE_FURNITURE = LACK;
 
 // Background images (static requires — Metro can't bundle a dynamic path).
-const BG_LIGHT = require("../assets/images/studio-bg.png");
-const BG_DARK = require("../assets/images/dark.png");
+// One light + dark backdrop per visual style. Cartoonish reuses the realistic
+// backdrops for now (its own art comes with the cartoon table).
+const BACKDROPS: Record<
+  FurnitureStyle,
+  { light: number; dark: number }
+> = {
+  realistic: {
+    light: require("../assets/images/studio-bg.png"),
+    dark: require("../assets/images/dark.png"),
+  },
+  cozy: {
+    light: require("../assets/images/cozy-bg.png"),
+    dark: require("../assets/images/cozy-dark.png"),
+  },
+  cartoonish: {
+    light: require("../assets/images/studio-bg.png"),
+    dark: require("../assets/images/dark.png"),
+  },
+};
 
 // ui related
 import { GreenFlash } from "@/game/ui/GreenFlash";
@@ -45,18 +63,32 @@ function ToggleChip({
   label,
   on,
   onToggle,
+  dark,
 }: {
   label: string;
   on: boolean;
   onToggle: () => void;
+  dark?: boolean;
 }) {
   return (
     <Pressable
-      style={[styles.chip, on && styles.chipOn]}
+      style={[
+        styles.chip,
+        dark && styles.chipDark,
+        on && (dark ? styles.chipOnDark : styles.chipOn),
+      ]}
       onPress={onToggle}
       hitSlop={6}
     >
-      <Text style={[styles.chipText, on && styles.chipTextOn]}>{label}</Text>
+      <Text
+        style={[
+          styles.chipText,
+          dark && styles.chipTextDark,
+          on && styles.chipTextOn,
+        ]}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -101,6 +133,7 @@ function GameScreen() {
   const undoneCount = useGameStore((s) => s.undoneActions.length);
   const [showSettings, setShowSettings] = useState(false);
   const totalCount = furniture?.actions.length ?? 0;
+  const dark = settings.darkMode;
   const objectiveFontSize = Math.round(14 * settings.fontScale);
   const orientationAction = orientationActionId
     ? furniture?.actions.find((a) => a.actionId === orientationActionId)
@@ -155,13 +188,14 @@ function GameScreen() {
 
   return (
     <ImageBackground
-      source={settings.darkMode ? BG_DARK : BG_LIGHT}
+      source={BACKDROPS[settings.style][settings.darkMode ? "dark" : "light"]}
       resizeMode="cover"
       style={[styles.root, settings.darkMode && styles.rootDark]}
     >
       <GestureDetector gesture={sceneGesture}>
         <View style={styles.sceneWrap}>
           <AssemblyScene
+            key={settings.style}
             cameraManipulator={manipulator}
             sceneState={sceneState}
             heldDriver={heldDriver}
@@ -170,11 +204,11 @@ function GameScreen() {
         </View>
       </GestureDetector>
       {settings.showHints ? (
-        <View style={styles.objectiveBar} pointerEvents="none">
-          <Text style={[styles.objectiveText, { fontSize: objectiveFontSize }]}>
+        <View style={[styles.objectiveBar, dark && styles.objectiveBarDark]} pointerEvents="none">
+          <Text style={[styles.objectiveText, dark && styles.objectiveTextDark, { fontSize: objectiveFontSize }]}>
             Stage {stage} · {objective} · {completedCount}/{totalCount}
           </Text>
-          <View style={styles.progressTrack}>
+          <View style={[styles.progressTrack, dark && styles.progressTrackDark]}>
             <View
               style={[
                 styles.progressFill,
@@ -185,8 +219,8 @@ function GameScreen() {
         </View>
       ) : null}
       {settings.focusMode ? null : (
-        <View style={styles.pointsChip} pointerEvents="none">
-          <Text style={styles.pointsText}>★ {completedCount * furniture.xpPerStep}</Text>
+        <View style={[styles.pointsChip, dark && styles.pointsChipDark]} pointerEvents="none">
+          <Text style={[styles.pointsText, dark && styles.pointsTextDark]}>★ {completedCount * furniture.xpPerStep}</Text>
         </View>
       )}
       <FitChip />
@@ -195,6 +229,7 @@ function GameScreen() {
         gestureFor={gestureFor}
         header={multiCluster ? <BaseStashControl /> : undefined}
         thumbs={furniture.thumbs}
+        dark={dark}
       />
       {sceneState.activeTighten ? (
         sceneState.activeTighten.tool === "mallet" ? (
@@ -210,11 +245,11 @@ function GameScreen() {
         <BeatControl action={sceneState.activeBeat} />
       ) : null}
       <View style={styles.joystickZone}>
-        <Joystick onStart={onStickStart} onMove={onStickMove} onEnd={onStickEnd} />
+        <Joystick onStart={onStickStart} onMove={onStickMove} onEnd={onStickEnd} dark={settings.darkMode} />
       </View>
       {settings.focusMode ? null : (
-        <Pressable style={styles.recenterButton} onPress={resetCamera} hitSlop={8}>
-          <Text style={styles.recenterText}>⟲ Recenter</Text>
+        <Pressable style={[styles.recenterButton, dark && styles.recenterButtonDark]} onPress={resetCamera} hitSlop={8}>
+          <Text style={[styles.recenterText, dark && styles.recenterTextDark]}>⟲ Recenter</Text>
         </Pressable>
       )}
       {heldActionId ? (
@@ -228,30 +263,30 @@ function GameScreen() {
       ) : null}
       {settings.focusMode ? null : (
         <Pressable
-          style={styles.settingsButton}
+          style={[styles.settingsButton, dark && styles.settingsButtonDark]}
           onPress={() => setShowSettings(true)}
           hitSlop={8}
         >
-          <Text style={styles.settingsIcon}>⚙</Text>
+          <Text style={[styles.settingsIcon, dark && styles.settingsIconDark]}>⚙</Text>
         </Pressable>
       )}
       {settings.focusMode ? null : (
       <View style={styles.undoRedoRow}>
         <Pressable
-          style={[styles.ctrlButton, completedCount === 0 && styles.ctrlDisabled]}
+          style={[styles.ctrlButton, dark && styles.ctrlButtonDark, completedCount === 0 && styles.ctrlDisabled]}
           onPress={() => useGameStore.getState().undoLastAction()}
           disabled={completedCount === 0}
           hitSlop={8}
         >
-          <Text style={styles.ctrlText}>↶</Text>
+          <Text style={[styles.ctrlText, dark && styles.ctrlTextDark]}>↶</Text>
         </Pressable>
         <Pressable
-          style={[styles.ctrlButton, undoneCount === 0 && styles.ctrlDisabled]}
+          style={[styles.ctrlButton, dark && styles.ctrlButtonDark, undoneCount === 0 && styles.ctrlDisabled]}
           onPress={() => useGameStore.getState().redoLastAction()}
           disabled={undoneCount === 0}
           hitSlop={8}
         >
-          <Text style={styles.ctrlText}>↷</Text>
+          <Text style={[styles.ctrlText, dark && styles.ctrlTextDark]}>↷</Text>
         </Pressable>
       </View>
       )}
@@ -260,12 +295,14 @@ function GameScreen() {
           label="Focus"
           on={settings.focusMode}
           onToggle={() => setSettings({ focusMode: !settings.focusMode })}
+          dark={dark}
         />
         {settings.focusMode ? null : (
           <ToggleChip
             label="Hints"
             on={settings.showHints}
             onToggle={() => setSettings({ showHints: !settings.showHints })}
+            dark={dark}
           />
         )}
         {settings.focusMode ? null : (
@@ -273,6 +310,7 @@ function GameScreen() {
             label="Auto-View"
             on={settings.autoView}
             onToggle={() => setSettings({ autoView: !settings.autoView })}
+            dark={dark}
           />
         )}
       </View>
@@ -395,4 +433,30 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: "#6f8a68", borderColor: "#6f8a68" },
   chipText: { fontSize: 12, fontWeight: "700", color: "#2e2a24" },
   chipTextOn: { color: "#fff" },
+
+  // ── Dark-mode chrome: dark translucent surfaces, light text/icons, and a
+  // deeper selected-green than the light theme's #6f8a68. ──
+  objectiveBarDark: { backgroundColor: "rgba(22,30,44,0.82)" },
+  objectiveTextDark: { color: "#eef1f6" },
+  progressTrackDark: { backgroundColor: "rgba(255,255,255,0.16)" },
+  pointsChipDark: { backgroundColor: "rgba(22,30,44,0.82)" },
+  pointsTextDark: { color: "#f0b866" },
+  recenterButtonDark: {
+    backgroundColor: "rgba(22,30,44,0.86)",
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+  recenterTextDark: { color: "#eef1f6" },
+  settingsButtonDark: { backgroundColor: "rgba(22,30,44,0.82)" },
+  settingsIconDark: { color: "#eef1f6" },
+  ctrlButtonDark: {
+    backgroundColor: "rgba(22,30,44,0.86)",
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+  ctrlTextDark: { color: "#eef1f6" },
+  chipDark: {
+    backgroundColor: "rgba(22,30,44,0.86)",
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+  chipOnDark: { backgroundColor: "#3e5a37", borderColor: "#3e5a37" },
+  chipTextDark: { color: "#eef1f6" },
 });

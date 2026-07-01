@@ -14,6 +14,9 @@ export type AssetSrc = number | { uri: string };
 
 // furniture list
 export type FurnitureId = "DALFRED" | "LACK";
+
+/** Visual style presets — swaps the table's look and the backdrop. */
+export type FurnitureStyle = "realistic" | "cozy" | "cartoonish";
 // meta data - easy to load
 export interface FurnitureMeta {
   id: FurnitureId;
@@ -27,7 +30,9 @@ export interface FurnitureMeta {
 // real model+task data - load when chosen to assemble
 export interface Furniture {
   meta: FurnitureMeta;
-  model: AssetSrc; // one combined GLB
+  model: AssetSrc; // one combined GLB (the "realistic" default)
+  /** Optional per-style model overrides; falls back to `model`. */
+  styleModels?: Partial<Record<FurnitureStyle, AssetSrc>>;
   parts: Record<string, PartDef>; // -> check PartDef in this script
   actions: readonly AssemblyAction[]; // -> check AssemblyAction[] in this script
   gates: Record<string, Gate>; // -> check Gate in this script

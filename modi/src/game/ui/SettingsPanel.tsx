@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
 
 import { useGameStore } from "@/game/core/store";
+import { FurnitureStyle } from "@/game/core/type";
 
 function Row({
   label,
@@ -29,6 +30,47 @@ function Row({
   );
 }
 
+const STYLE_OPTIONS: { value: FurnitureStyle; label: string }[] = [
+  { value: "realistic", label: "Hyper Realistic" },
+  { value: "cozy", label: "Cozy" },
+  { value: "cartoonish", label: "Cartoonish" },
+];
+
+function StyleSelector({
+  value,
+  onChange,
+}: {
+  value: FurnitureStyle;
+  onChange: (v: FurnitureStyle) => void;
+}) {
+  return (
+    <View style={styles.styleBlock}>
+      <Text style={styles.rowLabel}>Style</Text>
+      <Text style={styles.rowDesc}>Changes the table look and the backdrop</Text>
+      <View style={styles.segment}>
+        {STYLE_OPTIONS.map((o) => {
+          const active = o.value === value;
+          return (
+            <Pressable
+              key={o.value}
+              onPress={() => onChange(o.value)}
+              style={[styles.segBtn, active && styles.segBtnActive]}
+              hitSlop={4}
+            >
+              <Text
+                style={[styles.segText, active && styles.segTextActive]}
+                numberOfLines={2}
+              >
+                {o.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 /**
  * Settings panel. The Focus / Hints / Auto-View accessibility toggles live as
  * on-screen chips; this panel holds display + other settings.
@@ -42,6 +84,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
       <View style={styles.panel}>
         <Text style={styles.title}>Settings</Text>
+        <StyleSelector
+          value={settings.style}
+          onChange={(v) => setSettings({ style: v })}
+        />
         <Row
           label="Dark mode"
           desc="Use the dark background theme"
@@ -97,6 +143,27 @@ const styles = StyleSheet.create({
   rowText: { flex: 1, paddingRight: 12 },
   rowLabel: { fontSize: 15, fontWeight: "700", color: "#2e2a24" },
   rowDesc: { fontSize: 12, color: "#7a7163", marginTop: 2 },
+  styleBlock: { paddingVertical: 10 },
+  segment: { flexDirection: "row", gap: 6, marginTop: 10 },
+  segBtn: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 10,
+    backgroundColor: "#ece6d8",
+    borderWidth: 1,
+    borderColor: "rgba(60,50,40,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  segBtnActive: { backgroundColor: "#6f8a68", borderColor: "#6f8a68" },
+  segText: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: "#5a5346",
+    textAlign: "center",
+  },
+  segTextActive: { color: "#fff" },
   done: {
     marginTop: 12,
     alignSelf: "flex-end",

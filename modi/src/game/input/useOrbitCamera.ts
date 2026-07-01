@@ -16,7 +16,7 @@ const HOME_EYE: [number, number, number] = [1.0, 0.85, 1.0];
 // sits near screen-centre and the model trails behind it), and the camera sits
 // AUTO_RADIUS from that look point. Top-facing slots (bolts) are viewed from
 // slightly above; under-facing slots (legs) from slightly below.
-const AUTO_RADIUS = 1.15; // camera distance from the look point — lower = closer
+const AUTO_RADIUS = 1.0; // camera distance from the look point — lower = closer
 const AUTO_ELEV = 0.5; // elevation angle, radians (~29°)
 const AUTO_TARGET_BLEND = 0.5; // look-at: 0 = model centre, 1 = the slot itself
 function framingEye(
@@ -159,6 +159,13 @@ export function useOrbitCamera() {
   }, [manipulator]);
 
   useEffect(() => {
+    // While a part is held (being dragged/placed), freeze the camera: no
+    // re-aim, no re-frame. In normal mode the table stays put in the centre;
+    // in auto-view the hole framing set before pickup (from below, zoomed) is
+    // retained for the whole placement. Movement resumes — to frame the next
+    // open hole — only once the part is released. This also sidesteps the
+    // double-worldShift that a held focus point would otherwise re-add.
+    if (heldActionId) return;
     let nextTarget: [number, number, number];
     let nextEye: [number, number, number];
     if (autoFrame) {
@@ -195,7 +202,7 @@ export function useOrbitCamera() {
         ? h
         : { eye: nextEye, target: nextTarget },
     );
-  }, [stage, activeCluster, heldFocusPoint, autoFocusPartId, focusCluster, pivot, autoFrame]);
+  }, [stage, activeCluster, heldFocusPoint, autoFocusPartId, focusCluster, pivot, autoFrame, heldActionId]);
 
   const stick = useRef({ x: 0, y: 0 });
   const grab = useRef({ active: false, x: 0, y: 0 });

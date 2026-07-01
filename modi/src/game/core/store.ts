@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { availableActions, currentStage } from "@/game/core/assembly/availability";
 import { FitState } from "@/game/core/geometry/fit";
-import { AssemblyAction, Furniture, Vec3 } from "@/game/core/type";
+import { AssemblyAction, Furniture, FurnitureStyle, Vec3 } from "@/game/core/type";
 
 /** Total clockwise rotation to fully tighten a fastener, in degrees. */
 export const TIGHTEN_TOTAL_DEG = 720;
@@ -17,6 +17,7 @@ export interface AccessibilitySettings {
   showHints: boolean; // instructional prompts on/off
   autoView: boolean; // auto-orient to the next highlighted socket
   darkMode: boolean; // dark background theme
+  style: FurnitureStyle; // visual preset: table look + backdrop
   // ADDITIVE toggles…
   showPictogram: boolean;
   showSymbols: boolean;
@@ -31,6 +32,7 @@ const DEFAULT_SETTINGS: AccessibilitySettings = {
   showHints: true,
   autoView: false,
   darkMode: false,
+  style: "realistic",
   showPictogram: false,
   showSymbols: false,
   audioCues: false,

@@ -15,6 +15,8 @@ interface Props {
   header?: ReactNode;
   /** Per-group thumbnail, keyed by group (furniture.thumbs). May be sparse. */
   thumbs?: Record<string, number>;
+  /** Dark-mode theming (matches the rest of the HUD). */
+  dark?: boolean;
 }
 
 /**
@@ -22,7 +24,7 @@ interface Props {
  * with remaining counts. Long-press an enabled card to take one in hand and
  * drag it into the scene; locked cards are waiting on other steps.
  */
-export function PartsTray({ items, gestureFor, header, thumbs }: Props) {
+export function PartsTray({ items, gestureFor, header, thumbs, dark }: Props) {
   if (items.length === 0 && !header) return null;
   return (
     <View style={styles.column} pointerEvents="box-none">
@@ -37,14 +39,14 @@ export function PartsTray({ items, gestureFor, header, thumbs }: Props) {
           const card = (
             <View
               key={item.group}
-              style={[styles.card, !item.enabled && styles.cardDisabled]}
+              style={[styles.card, dark && styles.cardDark, !item.enabled && styles.cardDisabled]}
             >
               {thumb ? (
                 <Image source={thumb} style={styles.thumb} resizeMode="contain" />
               ) : (
                 <View style={styles.thumb} />
               )}
-              <Text style={styles.label} numberOfLines={2}>
+              <Text style={[styles.label, dark && styles.labelDark]} numberOfLines={2}>
                 {item.label}
               </Text>
               {item.remaining > 1 ? (
@@ -93,6 +95,11 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   cardDisabled: { opacity: 0.35 },
+  cardDark: {
+    backgroundColor: "rgba(22,30,44,0.86)",
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+  labelDark: { color: "#eef1f6" },
   thumb: { width: 44, height: 44 },
   label: {
     fontSize: 11,

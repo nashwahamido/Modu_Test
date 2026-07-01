@@ -10,11 +10,18 @@ import { LABELS } from "./parts.authored";
 import { ALL_PART_IDS, PARTS } from "./parts.gen";
 
 // assets — the combined LACK GLB (whole_* named entities at baked poses).
-const model = require("../../../assets/models/furniture-models/LACK/LACK_v2.glb");
+const model = require("../../../assets/models/furniture-models/LACK/LACK.glb");
+// Cozy style variant: olive-glossy top/legs, metal bolts, no outline.
+const MODEL_COZY = require("../../../assets/models/furniture-models/LACK/LACK_cozy.glb");
 // Placeholder: meta.thumbnail is only used by a furniture picker (GameScreen
 // never renders it), so it points at the model file to avoid a separate PNG
 // asset. Swap to a real preview PNG later.
-const thumbnail = require("../../../assets/models/furniture-models/LACK/LACK_v2.glb");
+const thumbnail = require("../../../assets/models/furniture-models/LACK/LACK.glb");
+
+// Per-part 3D preview thumbnails for the inventory tray, keyed by part group.
+const THUMB_TABLETOP = require("../../../assets/images/thumb_tableTop.png");
+const THUMB_LEG = require("../../../assets/images/thumb_leg.png");
+const THUMB_SCREW = require("../../../assets/images/thumb_screw.png");
 
 // The table top is a flat surface you just set down — no twist-to-lock. Every
 // other part (the legs) keeps the screw-in-by-hand twist.
@@ -36,10 +43,12 @@ export const LACK: Furniture = {
     stepCount: ACTIONS.length,
   },
   model,
+  // Per-style table looks; cartoonish falls back to the realistic model for now.
+  styleModels: { realistic: model, cozy: MODEL_COZY },
   parts: PARTS_TUNED,
   actions: ACTIONS,
   gates: GATES,
-  thumbs: {}, // no per-part thumbnails yet → tray shows labelled blanks
+  thumbs: { tableTop: THUMB_TABLETOP, leg: THUMB_LEG, screw115980: THUMB_SCREW },
   instructions: INSTRUCTIONS,
   labels: LABELS,
   xpPerStep: 10,
